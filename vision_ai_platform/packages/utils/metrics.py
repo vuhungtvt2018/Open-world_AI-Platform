@@ -1,0 +1,1312 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import torch
+import torch.nn as nn
+import numpy as np
+
+
+OKS_SIGMA = (
+    np.array(
+        [0.26, 0.25, 0.25, 0.35, 0.35, 0.79, 0.79, 0.72, 0.72, 0.62, 0.62, 1.07, 1.07, 0.87, 0.87, 0.89, 0.89],
+        dtype=np.float32,
+    )
+    / 10.0
+)
+RLE_WEIGHT = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.2, 1.2, 1.5, 1.5, 1.0, 1.0, 1.2, 1.2, 1.5, 1.5])
+CITYSCAPES_WEIGHT = np.array(
+    [
+        0.8373,
+        0.918,
+        0.866,
+        1.0345,
+        1.0166,
+        0.9969,
+        0.9754,
+        1.0489,
+        0.8786,
+        1.0023,
+        0.9539,
+        0.9843,
+        1.1116,
+        0.9037,
+        1.0865,
+        1.0955,
+        1.0865,
+        1.1529,
+        1.0507,
+    ]
+)
+
+
+def smooth(y: np.ndarray, f: float = 0.05) -> np.ndarray:
+    """Box filter of fraction f."""
+    nf = round(len(y) * f * 2) // 2 + 1  # number of filter elements (must be odd)
+    p = np.ones(nf // 2)  # ones padding
+    yp = np.concatenate((p * y[0], y, p * y[-1]), 0)  # y padded
+    return np.convolve(yp, np.ones(nf) / nf, mode="valid")  # y-smoothed
+
+
+def compute_ap(recall: list[float], precision: list[float]) -> tuple[float, np.ndarray, np.ndarray]:
+    """Compute the average precision (AP) given the recall and precision curves.
+
+    Args:
+        recall (list[float]): The recall curve.
+        precision (list[float]): The precision curve.
+
+    Returns:
+        ap (float): Average precision.
+        mpre (np.ndarray): Precision envelope curve.
+        mrec (np.ndarray): Modified recall curve with sentinel values added at the beginning and end.
+    """
+    # Append sentinel values to beginning and end
+    mrec = np.concatenate(([0.0], recall, [recall[-1] if len(recall) else 1.0], [1.0]))
+    mpre = np.concatenate(([1.0], precision, [0.0], [0.0]))
+
+    # Compute the precision envelope
+    mpre = np.flip(np.maximum.accumulate(np.flip(mpre)))
+
+    # Integrate area under curve
+    method = "interp"  # methods: 'continuous', 'interp'
+    if method == "interp":
+        x = np.linspace(0, 1, 101)  # 101-point interp (COCO)
+        func = np.trapezoid
+        ap = func(np.interp(x, mrec, mpre), x)  # integrate
+    else:  # 'continuous'
+        i = np.where(mrec[1:] != mrec[:-1])[0]  # points where x-axis (recall) changes
+        ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])  # area under curve
+
+    return ap, mpre, mrec
+
+
+def ap_per_class(
+    tp: np.ndarray,
+    conf: np.ndarray,
+    pred_cls: np.ndarray,
+    target_cls: np.ndarray,
+    names: dict[int, str] | None = None,
+    eps: float = 1e-16,
+) -> tuple:
+    """Compute the average precision per class for object detection evaluation.
+
+    Args:
+        tp (np.ndarray): Binary array indicating whether the detection is correct (True) or not (False).
+        conf (np.ndarray): Array of confidence scores of the detections.
+        pred_cls (np.ndarray): Array of predicted classes of the detections.
+        target_cls (np.ndarray): Array of true classes of the targets.
+        plot (bool, optional): Whether to plot PR curves or not.
+        names (dict[int, str], optional): Dictionary of class names to plot PR curves.
+        eps (float, optional): A small value to avoid division by zero.
+
+    Returns:
+        tp (np.ndarray): True positive counts at threshold given by max F1 metric for each class.
+        fp (np.ndarray): False positive counts at threshold given by max F1 metric for each class.
+        p (np.ndarray): Precision values at threshold given by max F1 metric for each class.
+        r (np.ndarray): Recall values at threshold given by max F1 metric for each class.
+        f1 (np.ndarray): F1-score values at threshold given by max F1 metric for each class.
+        ap (np.ndarray): Average precision for each class at different IoU thresholds.
+        unique_classes (np.ndarray): An array of unique classes that have data.
+        p_curve (np.ndarray): Precision curves for each class.
+        r_curve (np.ndarray): Recall curves for each class.
+        f1_curve (np.ndarray): F1-score curves for each class.
+        x (np.ndarray): X-axis values for the curves.
+        prec_values (np.ndarray): Precision values at mAP@0.5 for each class.
+    """
+    names = names if names is not None else {}
+    # Sort by objectness
+    i = np.argsort(-conf)
+    tp, conf, pred_cls = tp[i], conf[i], pred_cls[i]
+
+    # Find unique classes
+    unique_classes, nt = np.unique(target_cls, return_counts=True)
+    nc = unique_classes.shape[0]  # number of classes, number of detections
+
+    # Create Precision-Recall curve and compute AP for each class
+    x, prec_values = np.linspace(0, 1, 1000), []
+
+    # Average precision, precision and recall curves
+    ap, p_curve, r_curve = np.zeros((nc, tp.shape[1])), np.zeros((nc, 1000)), np.zeros((nc, 1000))
+    for ci, c in enumerate(unique_classes):
+        i = pred_cls == c
+        n_l = nt[ci]  # number of labels
+        n_p = i.sum()  # number of predictions
+        if n_p == 0 or n_l == 0:
+            prec_values.append(np.zeros_like(x))  # keep one row per class, aligned with `ap` and `names`
+            continue
+
+        # Accumulate FPs and TPs
+        fpc = (1 - tp[i]).cumsum(0)
+        tpc = tp[i].cumsum(0)
+
+        # Recall
+        recall = tpc / (n_l + eps)  # recall curve
+        r_curve[ci] = np.interp(-x, -conf[i], recall[:, 0], left=0)  # negative x, xp because xp decreases
+
+        # Precision
+        precision = tpc / (tpc + fpc)  # precision curve
+        p_curve[ci] = np.interp(-x, -conf[i], precision[:, 0], left=1)  # p at pr_score
+
+        # AP from recall-precision curve
+        for j in range(tp.shape[1]):
+            ap[ci, j], mpre, mrec = compute_ap(recall[:, j], precision[:, j])
+            if j == 0:
+                prec_values.append(np.interp(x, mrec, mpre))  # precision at mAP@0.5
+
+    prec_values = np.array(prec_values) if prec_values else np.zeros((1, 1000))  # (nc, 1000)
+
+    # Compute F1 (harmonic mean of precision and recall)
+    f1_curve = 2 * p_curve * r_curve / (p_curve + r_curve + eps)
+    names = {i: names[k] for i, k in enumerate(unique_classes) if k in names}  # dict: only classes that have data
+
+    i = smooth(f1_curve.mean(0), 0.1).argmax()  # max F1 index
+    p, r, f1 = p_curve[:, i], r_curve[:, i], f1_curve[:, i]  # max-F1 precision, recall, F1 values
+    tp = (r * nt).round()  # true positives
+    fp = (tp / (p + eps) - tp).round()  # false positives
+    return tp, fp, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values
+
+
+class Metric:
+    """Class for computing evaluation metrics.
+
+    Attributes:
+        p (list): Precision for each class. Shape: (nc,).
+        r (list): Recall for each class. Shape: (nc,).
+        f1 (list): F1 score for each class. Shape: (nc,).
+        all_ap (list): AP scores for all classes and all IoU thresholds. Shape: (nc, 10).
+        ap_class_index (list): Index of class for each AP score. Shape: (nc,).
+        nc (int): Number of classes.
+
+    Methods:
+        ap50: AP at IoU threshold of 0.5 for all classes.
+        ap: AP at IoU thresholds from 0.5 to 0.95 for all classes.
+        mp: Mean precision of all classes.
+        mr: Mean recall of all classes.
+        map50: Mean AP at IoU threshold of 0.5 for all classes.
+        map75: Mean AP at IoU threshold of 0.75 for all classes.
+        map: Mean AP at IoU thresholds from 0.5 to 0.95 for all classes.
+        mean_results: Mean of results, returns mp, mr, map50, map.
+        class_result: Class-aware result, returns p[i], r[i], ap50[i], ap[i].
+        maps: mAP of each class.
+        fitness: Model fitness as a weighted combination of metrics.
+        update: Update metric attributes with new evaluation results.
+        curves: Provides a list of curves for accessing specific metrics like precision, recall, F1, etc.
+        curves_results: Provide a list of results for accessing specific metrics like precision, recall, F1, etc.
+    """
+
+    def __init__(self) -> None:
+        """Initialize a Metric instance for computing evaluation metrics for the YOLO model."""
+        self.p = []  # (nc, )
+        self.r = []  # (nc, )
+        self.f1 = []  # (nc, )
+        self.all_ap = []  # (nc, 10)
+        self.ap_class_index = []  # (nc, )
+        self.nc = 0
+        self.image_metrics = {}
+
+    @property
+    def ap50(self) -> np.ndarray | list:
+        """Return the Average Precision (AP) at an IoU threshold of 0.5 for all classes.
+
+        Returns:
+            (np.ndarray | list): Array of shape (nc,) with AP50 values per class, or an empty list if not available.
+        """
+        return self.all_ap[:, 0] if len(self.all_ap) else []
+
+    @property
+    def ap(self) -> np.ndarray | list:
+        """Return the Average Precision (AP) at an IoU threshold of 0.5-0.95 for all classes.
+
+        Returns:
+            (np.ndarray | list): Array of shape (nc,) with AP50-95 values per class, or an empty list if not available.
+        """
+        return self.all_ap.mean(1) if len(self.all_ap) else []
+
+    @property
+    def mp(self) -> float:
+        """Return the Mean Precision of all classes.
+
+        Returns:
+            (float): The mean precision of all classes.
+        """
+        return self.p.mean() if len(self.p) else 0.0
+
+    @property
+    def mr(self) -> float:
+        """Return the Mean Recall of all classes.
+
+        Returns:
+            (float): The mean recall of all classes.
+        """
+        return self.r.mean() if len(self.r) else 0.0
+
+    @property
+    def map50(self) -> float:
+        """Return the mean Average Precision (mAP) at an IoU threshold of 0.5.
+
+        Returns:
+            (float): The mAP at an IoU threshold of 0.5.
+        """
+        return self.all_ap[:, 0].mean() if len(self.all_ap) else 0.0
+
+    @property
+    def map75(self) -> float:
+        """Return the mean Average Precision (mAP) at an IoU threshold of 0.75.
+
+        Returns:
+            (float): The mAP at an IoU threshold of 0.75.
+        """
+        return self.all_ap[:, 5].mean() if len(self.all_ap) else 0.0
+
+    @property
+    def map(self) -> float:
+        """Return the mean Average Precision (mAP) over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
+
+        Returns:
+            (float): The mAP over IoU thresholds of 0.5 - 0.95 in steps of 0.05.
+        """
+        return self.all_ap.mean() if len(self.all_ap) else 0.0
+
+    def mean_results(self) -> list[float]:
+        """Return mean of results, mp, mr, map50, map."""
+        return [self.mp, self.mr, self.map50, self.map]
+
+    def class_result(self, i: int) -> tuple[float, float, float, float]:
+        """Return class-aware result, p[i], r[i], ap50[i], ap[i]."""
+        return self.p[i], self.r[i], self.ap50[i], self.ap[i]
+
+    @property
+    def maps(self) -> np.ndarray:
+        """Return mAP of each class."""
+        maps = np.zeros(self.nc) + self.map
+        for i, c in enumerate(self.ap_class_index):
+            maps[c] = self.ap[i]
+        return maps
+
+    def fitness(self) -> float:
+        """Return model fitness as a weighted combination of metrics."""
+        w = [0.0, 0.0, 0.0, 1.0]  # weights for [P, R, mAP@0.5, mAP@0.5:0.95]
+        return float((np.nan_to_num(np.array(self.mean_results())) * w).sum())
+
+    def update(self, results: tuple):
+        """Update the evaluation metrics with a new set of results.
+
+        Args:
+            results (tuple): A tuple containing evaluation metrics:
+                - p (list): Precision for each class.
+                - r (list): Recall for each class.
+                - f1 (list): F1 score for each class.
+                - all_ap (list): AP scores for all classes and all IoU thresholds.
+                - ap_class_index (list): Index of class for each AP score.
+                - p_curve (list): Precision curve for each class.
+                - r_curve (list): Recall curve for each class.
+                - f1_curve (list): F1 curve for each class.
+                - px (list): X values for the curves.
+                - prec_values (list): Precision values for each class.
+        """
+        (
+            self.p,
+            self.r,
+            self.f1,
+            self.all_ap,
+            self.ap_class_index,
+            self.p_curve,
+            self.r_curve,
+            self.f1_curve,
+            self.px,
+            self.prec_values,
+        ) = results
+
+    def clear_image_metrics(self) -> None:
+        """Clear stored per-image metrics from the current validation run."""
+        self.image_metrics.clear()
+
+    @property
+    def curves(self) -> list:
+        """Return a list of curves for accessing specific metrics curves."""
+        return []
+
+    @property
+    def curves_results(self) -> list[list]:
+        """Return a list of curves results for accessing specific metrics curves."""
+        return [
+            [self.px, self.prec_values, "Recall", "Precision"],
+            [self.px, self.f1_curve, "Confidence", "F1"],
+            [self.px, self.p_curve, "Confidence", "Precision"],
+            [self.px, self.r_curve, "Confidence", "Recall"],
+        ]
+
+    def update_image_metrics(self, tp: np.ndarray, target_cls: np.ndarray, pred_cls: np.ndarray, im_name: str) -> None:
+        """Update per-image precision, recall, F1, TP, FP, and FN at IoU threshold 0.5.
+
+        Args:
+            tp (np.ndarray): True positive array of shape (num_preds, num_iou_thresholds), where the first column (IoU
+                >= 0.5) is used.
+            target_cls (np.ndarray): Ground truth class labels for the image.
+            pred_cls (np.ndarray): Predicted class labels for the image.
+            im_name (str): The image filename used as the per-image key.
+        """
+        # Use the default IoU=0.5 column to match the validator's image-level matching policy.
+        tp = int(tp[:, 0].sum())
+        num_preds = pred_cls.shape[0]
+        num_targets = target_cls.shape[0]
+        fp = num_preds - tp
+        fn = num_targets - tp
+        if num_preds == 0 and num_targets == 0:
+            # Empty-GT image with no predictions is a trivially correct call, so report a perfect score rather than
+            # zeroing out P/R/F1 by the standard 0/0 fallback below.
+            precision = recall = f1 = 1.0
+        else:
+            precision = tp / num_preds if num_preds else 0.0
+            recall = tp / num_targets if num_targets else 0.0
+            denom = precision + recall
+            f1 = 2 * precision * recall / denom if denom else 0.0
+        self.image_metrics[im_name] = {
+            "precision": float(precision),
+            "recall": float(recall),
+            "f1": float(f1),
+            "tp": int(tp),
+            "fp": int(fp),
+            "fn": int(fn),
+        }
+
+
+class DetMetrics:
+    """Utility class for computing detection metrics such as precision, recall, and mean average precision (mAP).
+
+    Attributes:
+        names (dict[int, str]): A dictionary of class names.
+        box (Metric): An instance of the Metric class for storing detection results.
+        speed (dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
+        stats (dict[str, list]): A dictionary containing lists for true positives, confidence scores, predicted classes,
+            target classes, and target images.
+        nt_per_class: Number of targets per class.
+        nt_per_image: Number of targets per image.
+
+    Methods:
+        update_stats: Update statistics by appending new values to existing stat collections.
+        process: Process predicted results for object detection and update metrics.
+        clear_stats: Clear the stored statistics.
+        keys: Return a list of keys for accessing specific metrics.
+        mean_results: Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95.
+        class_result: Return the result of evaluating the performance of an object detection model on a specific class.
+        maps: Return mean Average Precision (mAP) scores per class.
+        fitness: Return the fitness of box object.
+        ap_class_index: Return the average precision index per class.
+        results_dict: Return dictionary of computed performance metrics and statistics.
+        curves: Return a list of curves for accessing specific metrics curves.
+        curves_results: Return a list of computed performance metrics and statistics.
+        summary: Generate a summarized representation of per-class detection metrics as a list of dictionaries.
+    """
+
+    def __init__(self, names: dict[int, str] | None = None) -> None:
+        """Initialize a DetMetrics instance with class names.
+
+        Args:
+            names (dict[int, str], optional): Dictionary of class names.
+        """
+        self.names = names if names is not None else {}
+        self.box = Metric()
+        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+        self.stats = {"tp": [], "conf": [], "pred_cls": [], "target_cls": [], "target_img": []}
+        self.nt_per_class = None
+        self.nt_per_image = None
+
+    def update_stats(self, stat: dict[str, Any]) -> None:
+        """Update statistics by appending new values to existing stat collections.
+
+        Args:
+            stat (dict[str, Any]): Dictionary containing new statistical values to append. Keys should match existing
+                keys in self.stats.
+        """
+        for k in self.stats:
+            self.stats[k].append(stat[k])
+        self.box.update_image_metrics(stat["tp"], stat["target_cls"], stat["pred_cls"], stat["im_name"])
+
+    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
+        """Process predicted results for object detection and update metrics.
+
+        Args:
+            save_dir (Path): Directory to save plots. Defaults to Path(".").
+            plot (bool): Whether to plot precision-recall curves. Defaults to False.
+            on_plot (callable, optional): Function to call after plots are generated. Defaults to None.
+
+        Returns:
+            (dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
+        """
+        stats = {k: np.concatenate(v, 0) for k, v in self.stats.items()}  # to numpy
+        if not stats:
+            return stats
+        results = ap_per_class(
+            stats["tp"],
+            stats["conf"],
+            stats["pred_cls"],
+            stats["target_cls"],
+            plot=plot,
+            save_dir=save_dir,
+            names=self.names,
+            on_plot=on_plot,
+            prefix="Box",
+        )[2:]
+        self.box.nc = len(self.names)
+        self.box.update(results)
+        self.nt_per_class = np.bincount(stats["target_cls"].astype(int), minlength=len(self.names))
+        self.nt_per_image = np.bincount(stats["target_img"].astype(int), minlength=len(self.names))
+        return stats
+
+    def clear_stats(self):
+        """Clear the stored statistics."""
+        for v in self.stats.values():
+            v.clear()
+
+    def clear_image_metrics(self) -> None:
+        """Clear stored per-image metrics."""
+        self.box.clear_image_metrics()
+
+    @property
+    def keys(self) -> list[str]:
+        """Return a list of keys for accessing specific metrics."""
+        return ["metrics/precision(B)", "metrics/recall(B)", "metrics/mAP50(B)", "metrics/mAP50-95(B)"]
+
+    def mean_results(self) -> list[float]:
+        """Calculate mean of detected objects & return precision, recall, mAP50, and mAP50-95."""
+        return self.box.mean_results()
+
+    def class_result(self, i: int) -> tuple[float, float, float, float]:
+        """Return the result of evaluating the performance of an object detection model on a specific class."""
+        return self.box.class_result(i)
+
+    @property
+    def maps(self) -> np.ndarray:
+        """Return mean Average Precision (mAP) scores per class."""
+        return self.box.maps
+
+    @property
+    def fitness(self) -> float:
+        """Return the fitness of box object."""
+        return self.box.fitness()
+
+    @property
+    def ap_class_index(self) -> list:
+        """Return the average precision index per class."""
+        return self.box.ap_class_index
+
+    @property
+    def results_dict(self) -> dict[str, float]:
+        """Return dictionary of computed performance metrics and statistics."""
+        keys = [*self.keys, "fitness"]
+        values = ((float(x) if hasattr(x, "item") else x) for x in ([*self.mean_results(), self.fitness]))
+        return dict(zip(keys, values))
+
+    @property
+    def curves(self) -> list[str]:
+        """Return a list of curves for accessing specific metrics curves."""
+        return ["Precision-Recall(B)", "F1-Confidence(B)", "Precision-Confidence(B)", "Recall-Confidence(B)"]
+
+    @property
+    def curves_results(self) -> list[list]:
+        """Return a list of computed performance metrics and statistics."""
+        return self.box.curves_results
+
+    def summary(self, normalize: bool = True, decimals: int = 5) -> list[dict[str, Any]]:
+        """Generate a summarized representation of per-class detection metrics as a list of dictionaries. Includes
+        shared scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for each class.
+
+        Args:
+            normalize (bool): For Detect metrics, everything is normalized by default [0-1].
+            decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+            (list[dict[str, Any]]): A list of dictionaries, each representing one class with corresponding metric
+                values.
+
+        Examples:
+           >>> results = model.val(data="coco8.yaml")
+           >>> detection_summary = results.summary()
+           >>> print(detection_summary)
+        """
+        per_class = {
+            "Box-P": self.box.p,
+            "Box-R": self.box.r,
+            "Box-F1": self.box.f1,
+        }
+        return [
+            {
+                "Class": self.names[self.ap_class_index[i]],
+                "Images": self.nt_per_image[self.ap_class_index[i]],
+                "Instances": self.nt_per_class[self.ap_class_index[i]],
+                **{k: round(v[i], decimals) for k, v in per_class.items()},
+                "mAP50": round(self.class_result(i)[2], decimals),
+                "mAP50-95": round(self.class_result(i)[3], decimals),
+            }
+            for i in range(len(per_class["Box-P"]))
+        ]
+
+
+class SegmentMetrics(DetMetrics):
+    """Calculate and aggregate detection and segmentation metrics over a given set of classes.
+
+    Attributes:
+        names (dict[int, str]): Dictionary of class names.
+        box (Metric): An instance of the Metric class for storing detection results.
+        seg (Metric): An instance of the Metric class to calculate mask segmentation metrics.
+        speed (dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
+        stats (dict[str, list]): A dictionary containing lists for true positives, confidence scores, predicted classes,
+            target classes, and target images.
+        nt_per_class: Number of targets per class.
+        nt_per_image: Number of targets per image.
+
+    Methods:
+        process: Process the detection and segmentation metrics over the given set of predictions.
+        keys: Return a list of keys for accessing metrics.
+        mean_results: Return the mean metrics for bounding box and segmentation results.
+        class_result: Return classification results for a specified class index.
+        maps: Return mAP scores for object detection and segmentation models.
+        fitness: Return the fitness score for both segmentation and bounding box models.
+        curves: Return a list of curves for accessing specific metrics curves.
+        curves_results: Provide a list of computed performance metrics and statistics.
+        summary: Generate a summarized representation of per-class segmentation metrics as a list of dictionaries.
+    """
+
+    def __init__(self, names: dict[int, str] | None = None) -> None:
+        """Initialize a SegmentMetrics instance with class names.
+
+        Args:
+            names (dict[int, str], optional): Dictionary of class names.
+        """
+        DetMetrics.__init__(self, names)
+        self.seg = Metric()
+        self.stats["tp_m"] = []  # add additional stats for masks
+
+    def update_stats(self, stat: dict[str, Any]) -> None:
+        """Update statistics by appending new values to existing stat collections.
+
+        Args:
+            stat (dict[str, Any]): Dictionary containing new statistical values to append. Keys should match existing
+                keys in self.stats.
+        """
+        super().update_stats(stat)  # update box stats
+        self.seg.update_image_metrics(stat["tp_m"], stat["target_cls"], stat["pred_cls"], stat["im_name"])
+
+    def clear_image_metrics(self) -> None:
+        """Clear stored per-image metrics."""
+        super().clear_image_metrics()
+        self.seg.clear_image_metrics()
+
+    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
+        """Process the detection and segmentation metrics over the given set of predictions.
+
+        Args:
+            save_dir (Path): Directory to save plots. Defaults to Path(".").
+            plot (bool): Whether to plot precision-recall curves. Defaults to False.
+            on_plot (callable, optional): Function to call after plots are generated. Defaults to None.
+
+        Returns:
+            (dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
+        """
+        stats = DetMetrics.process(self, save_dir, plot, on_plot=on_plot)  # process box stats
+        results_mask = ap_per_class(
+            stats["tp_m"],
+            stats["conf"],
+            stats["pred_cls"],
+            stats["target_cls"],
+            plot=plot,
+            on_plot=on_plot,
+            save_dir=save_dir,
+            names=self.names,
+            prefix="Mask",
+        )[2:]
+        self.seg.nc = len(self.names)
+        self.seg.update(results_mask)
+        return stats
+
+    @property
+    def keys(self) -> list[str]:
+        """Return a list of keys for accessing metrics."""
+        return [
+            *DetMetrics.keys.fget(self),
+            "metrics/precision(M)",
+            "metrics/recall(M)",
+            "metrics/mAP50(M)",
+            "metrics/mAP50-95(M)",
+        ]
+
+    def mean_results(self) -> list[float]:
+        """Return the mean metrics for bounding box and segmentation results."""
+        return DetMetrics.mean_results(self) + self.seg.mean_results()
+
+    def class_result(self, i: int) -> list[float]:
+        """Return classification results for a specified class index."""
+        return DetMetrics.class_result(self, i) + self.seg.class_result(i)
+
+    @property
+    def maps(self) -> np.ndarray:
+        """Return mAP scores for object detection and segmentation models."""
+        return DetMetrics.maps.fget(self) + self.seg.maps
+
+    @property
+    def fitness(self) -> float:
+        """Return the fitness score for both segmentation and bounding box models."""
+        return self.seg.fitness() + DetMetrics.fitness.fget(self)
+
+    @property
+    def curves(self) -> list[str]:
+        """Return a list of curves for accessing specific metrics curves."""
+        return [
+            *DetMetrics.curves.fget(self),
+            "Precision-Recall(M)",
+            "F1-Confidence(M)",
+            "Precision-Confidence(M)",
+            "Recall-Confidence(M)",
+        ]
+
+    @property
+    def curves_results(self) -> list[list]:
+        """Return a list of computed performance metrics and statistics."""
+        return DetMetrics.curves_results.fget(self) + self.seg.curves_results
+
+    def summary(self, normalize: bool = True, decimals: int = 5) -> list[dict[str, Any]]:
+        """Generate a summarized representation of per-class segmentation metrics as a list of dictionaries. Includes
+        both box and mask scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for
+        each class.
+
+        Args:
+            normalize (bool): For Segment metrics, everything is normalized by default [0-1].
+            decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+            (list[dict[str, Any]]): A list of dictionaries, each representing one class with corresponding metric
+                values.
+
+        Examples:
+            >>> results = model.val(data="coco8-seg.yaml")
+            >>> seg_summary = results.summary(decimals=4)
+            >>> print(seg_summary)
+        """
+        per_class = {
+            "Mask-P": self.seg.p,
+            "Mask-R": self.seg.r,
+            "Mask-F1": self.seg.f1,
+        }
+        summary = DetMetrics.summary(self, normalize, decimals)  # get box summary
+        for i, s in enumerate(summary):
+            s.update({**{k: round(v[i], decimals) for k, v in per_class.items()}})
+        return summary
+
+
+class PoseMetrics(DetMetrics):
+    """Calculate and aggregate detection and pose metrics over a given set of classes.
+
+    Attributes:
+        names (dict[int, str]): Dictionary of class names.
+        pose (Metric): An instance of the Metric class to calculate pose metrics.
+        box (Metric): An instance of the Metric class for storing detection results.
+        speed (dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
+        stats (dict[str, list]): A dictionary containing lists for true positives, confidence scores, predicted classes,
+            target classes, and target images.
+        nt_per_class: Number of targets per class.
+        nt_per_image: Number of targets per image.
+
+    Methods:
+        process: Process the detection and pose metrics over the given set of predictions.
+        keys: Return a list of keys for accessing metrics.
+        mean_results: Return the mean results of box and pose.
+        class_result: Return the class-wise detection results for a specific class i.
+        maps: Return the mean average precision (mAP) per class for both box and pose detections.
+        fitness: Return combined fitness score for pose and box detection.
+        curves: Return a list of curves for accessing specific metrics curves.
+        curves_results: Provide a list of computed performance metrics and statistics.
+        summary: Generate a summarized representation of per-class pose metrics as a list of dictionaries.
+    """
+
+    def __init__(self, names: dict[int, str] | None = None) -> None:
+        """Initialize the PoseMetrics class with class names.
+
+        Args:
+            names (dict[int, str], optional): Dictionary of class names.
+        """
+        super().__init__(names)
+        self.pose = Metric()
+        self.stats["tp_p"] = []  # add additional stats for pose
+
+    def update_stats(self, stat: dict[str, Any]) -> None:
+        """Update statistics by appending new values to existing stat collections.
+
+        Args:
+            stat (dict[str, Any]): Dictionary containing new statistical values to append. Keys should match existing
+                keys in self.stats.
+        """
+        super().update_stats(stat)  # update box stats
+        self.pose.update_image_metrics(stat["tp_p"], stat["target_cls"], stat["pred_cls"], stat["im_name"])
+
+    def clear_image_metrics(self) -> None:
+        """Clear stored per-image metrics."""
+        super().clear_image_metrics()
+        self.pose.clear_image_metrics()
+
+    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot=None) -> dict[str, np.ndarray]:
+        """Process the detection and pose metrics over the given set of predictions.
+
+        Args:
+            save_dir (Path): Directory to save plots. Defaults to Path(".").
+            plot (bool): Whether to plot precision-recall curves. Defaults to False.
+            on_plot (callable, optional): Function to call after plots are generated.
+
+        Returns:
+            (dict[str, np.ndarray]): Dictionary containing concatenated statistics arrays.
+        """
+        stats = DetMetrics.process(self, save_dir, plot, on_plot=on_plot)  # process box stats
+        results_pose = ap_per_class(
+            stats["tp_p"],
+            stats["conf"],
+            stats["pred_cls"],
+            stats["target_cls"],
+            plot=plot,
+            on_plot=on_plot,
+            save_dir=save_dir,
+            names=self.names,
+            prefix="Pose",
+        )[2:]
+        self.pose.nc = len(self.names)
+        self.pose.update(results_pose)
+        return stats
+
+    @property
+    def keys(self) -> list[str]:
+        """Return a list of evaluation metric keys."""
+        return [
+            *DetMetrics.keys.fget(self),
+            "metrics/precision(P)",
+            "metrics/recall(P)",
+            "metrics/mAP50(P)",
+            "metrics/mAP50-95(P)",
+        ]
+
+    def mean_results(self) -> list[float]:
+        """Return the mean results of box and pose."""
+        return DetMetrics.mean_results(self) + self.pose.mean_results()
+
+    def class_result(self, i: int) -> list[float]:
+        """Return the class-wise detection results for a specific class i."""
+        return DetMetrics.class_result(self, i) + self.pose.class_result(i)
+
+    @property
+    def maps(self) -> np.ndarray:
+        """Return the mean average precision (mAP) per class for both box and pose detections."""
+        return DetMetrics.maps.fget(self) + self.pose.maps
+
+    @property
+    def fitness(self) -> float:
+        """Return combined fitness score for pose and box detection."""
+        return self.pose.fitness() + DetMetrics.fitness.fget(self)
+
+    @property
+    def curves(self) -> list[str]:
+        """Return a list of curves for accessing specific metrics curves."""
+        return [
+            *DetMetrics.curves.fget(self),
+            "Precision-Recall(P)",
+            "F1-Confidence(P)",
+            "Precision-Confidence(P)",
+            "Recall-Confidence(P)",
+        ]
+
+    @property
+    def curves_results(self) -> list[list]:
+        """Return a list of computed performance metrics and statistics."""
+        return DetMetrics.curves_results.fget(self) + self.pose.curves_results
+
+    def summary(self, normalize: bool = True, decimals: int = 5) -> list[dict[str, Any]]:
+        """Generate a summarized representation of per-class pose metrics as a list of dictionaries. Includes both box
+        and pose scalar metrics (mAP, mAP50, mAP75) alongside precision, recall, and F1-score for each class.
+
+        Args:
+            normalize (bool): For Pose metrics, everything is normalized by default [0-1].
+            decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+            (list[dict[str, Any]]): A list of dictionaries, each representing one class with corresponding metric
+                values.
+
+        Examples:
+            >>> results = model.val(data="coco8-pose.yaml")
+            >>> pose_summary = results.summary(decimals=4)
+            >>> print(pose_summary)
+        """
+        per_class = {
+            "Pose-P": self.pose.p,
+            "Pose-R": self.pose.r,
+            "Pose-F1": self.pose.f1,
+        }
+        summary = DetMetrics.summary(self, normalize, decimals)  # get box summary
+        for i, s in enumerate(summary):
+            s.update({**{k: round(v[i], decimals) for k, v in per_class.items()}})
+        return summary
+
+
+class ClassifyMetrics:
+    """Class for computing classification metrics including top-1 and top-5 accuracy.
+
+    Attributes:
+        top1 (float): The top-1 accuracy.
+        top5 (float): The top-5 accuracy.
+        speed (dict[str, float]): A dictionary containing the time taken for each step in the pipeline.
+
+    Methods:
+        process: Process target classes and predicted classes to compute metrics.
+        fitness: Return mean of top-1 and top-5 accuracies as fitness score.
+        results_dict: Return a dictionary with model's performance metrics and fitness score.
+        keys: Return a list of keys for the results_dict property.
+        curves: Return a list of curves for accessing specific metrics curves.
+        curves_results: Provide a list of computed performance metrics and statistics.
+        summary: Generate a single-row summary of classification metrics (Top-1 and Top-5 accuracy).
+    """
+
+    def __init__(self) -> None:
+        """Initialize a ClassifyMetrics instance."""
+        self.top1 = 0
+        self.top5 = 0
+        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+
+    def process(self, targets: torch.Tensor, pred: torch.Tensor):
+        """Process target classes and predicted classes to compute metrics.
+
+        Args:
+            targets (torch.Tensor): Target classes.
+            pred (torch.Tensor): Predicted classes.
+        """
+        pred, targets = torch.cat(pred), torch.cat(targets)
+        correct = (targets[:, None] == pred).float()
+        acc = torch.stack((correct[:, 0], correct.max(1).values), dim=1)  # (top1, top5) accuracy
+        self.top1, self.top5 = acc.mean(0).tolist()
+
+    @property
+    def fitness(self) -> float:
+        """Return mean of top-1 and top-5 accuracies as fitness score."""
+        return (self.top1 + self.top5) / 2
+
+    @property
+    def results_dict(self) -> dict[str, float]:
+        """Return a dictionary with model's performance metrics and fitness score."""
+        return dict(zip([*self.keys, "fitness"], [self.top1, self.top5, self.fitness]))
+
+    @property
+    def keys(self) -> list[str]:
+        """Return a list of keys for the results_dict property."""
+        return ["metrics/accuracy_top1", "metrics/accuracy_top5"]
+
+    @property
+    def curves(self) -> list:
+        """Return a list of curves for accessing specific metrics curves."""
+        return []
+
+    @property
+    def curves_results(self) -> list:
+        """Return a list of curves results for accessing specific metrics curves."""
+        return []
+
+    def summary(self, normalize: bool = True, decimals: int = 5) -> list[dict[str, float]]:
+        """Generate a single-row summary of classification metrics (Top-1 and Top-5 accuracy).
+
+        Args:
+            normalize (bool): For Classify metrics, everything is normalized by default [0-1].
+            decimals (int): Number of decimal places to round the metrics values to.
+
+        Returns:
+            (list[dict[str, float]]): A list with one dictionary containing Top-1 and Top-5 classification accuracy.
+
+        Examples:
+            >>> results = model.val(data="imagenet10")
+            >>> classify_summary = results.summary(decimals=4)
+            >>> print(classify_summary)
+        """
+        return [{"top1_acc": round(self.top1, decimals), "top5_acc": round(self.top5, decimals)}]
+
+
+class OBBMetrics(DetMetrics):
+    """Metrics for evaluating oriented bounding box (OBB) detection.
+
+    Attributes:
+        names (dict[int, str]): Dictionary of class names.
+        box (Metric): An instance of the Metric class for storing detection results.
+        speed (dict[str, float]): A dictionary for storing execution times of different parts of the detection process.
+        stats (dict[str, list]): A dictionary containing lists for true positives, confidence scores, predicted classes,
+            target classes, and target images.
+        nt_per_class: Number of targets per class.
+        nt_per_image: Number of targets per image.
+
+    References:
+        https://arxiv.org/pdf/2106.06072.pdf
+    """
+
+    def __init__(self, names: dict[int, str] | None = None) -> None:
+        """Initialize an OBBMetrics instance with class names.
+
+        Args:
+            names (dict[int, str], optional): Dictionary of class names.
+        """
+        DetMetrics.__init__(self, names)
+
+
+class SemanticMetrics:
+    """Metrics for semantic segmentation, including mIoU, pixel accuracy, and per-class IoU.
+
+    Attributes:
+        names (dict): Class names mapping.
+        nc (int): Number of classes.
+        cm_nc (int): Confusion matrix side length (2 for binary segmentation, else nc).
+        device (torch.device | None): Device used for confusion matrix accumulation.
+        matrix (torch.Tensor | None): Accumulated confusion matrix of shape (cm_nc, cm_nc).
+        speed (dict): Processing speed statistics.
+        nt_per_image (np.ndarray): Number of images containing each class.
+        nt_per_class (np.ndarray): Number of pixels per class.
+        _miou (float): Cached mean IoU.
+        _pixel_accuracy (float): Cached pixel accuracy.
+        _per_class_iou (np.ndarray): Cached per-class IoU values.
+        _per_class_pixel_acc (np.ndarray): Cached per-class pixel accuracy.
+    """
+
+    def __init__(self, names: dict[int, str] | None = None) -> None:
+        """Initialize semantic segmentation metrics.
+
+        Args:
+            names (dict, optional): Dictionary mapping class indices to names.
+        """
+        self.names = names or {}
+        self.nc = len(self.names)
+        self.cm_nc = 2 if self.nc == 1 else self.nc
+        self.matrix = None
+        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+        self.nt_per_image = np.zeros(self.nc, dtype=np.int32)
+        self._miou = 0.0
+        self._pixel_accuracy = 0.0
+        self._per_class_iou = np.zeros(self.nc, dtype=np.float32)
+        self._per_class_pixel_acc = np.zeros(self.nc, dtype=np.float32)
+        self.nt_per_class = np.zeros(self.nc, dtype=np.int32)
+
+    def update_stats(self, preds: torch.Tensor, targets: torch.Tensor) -> None:
+        """Accumulate confusion matrix from predictions and targets.
+
+        Args:
+            preds (torch.Tensor): Predicted class IDs [B, H, W].
+            targets (torch.Tensor): Ground truth class IDs [B, H, W].
+        """
+        if self.matrix is None:
+            self.matrix = torch.zeros((self.cm_nc, self.cm_nc), device=preds.device, dtype=torch.float32)
+
+        valid = (targets != 255) & (preds >= 0) & (preds < self.cm_nc) & (targets >= 0) & (targets < self.cm_nc)
+        hist = torch.bincount(self.cm_nc * targets[valid] + preds[valid], minlength=self.cm_nc**2).reshape(
+            self.cm_nc, self.cm_nc
+        )
+        self.matrix += hist.to(self.matrix.dtype)
+
+        present = torch.zeros((targets.shape[0], self.cm_nc), dtype=torch.bool, device=targets.device)
+        batch_idx = torch.arange(targets.shape[0], device=targets.device).view(-1, 1, 1).expand_as(targets)
+        present[batch_idx[valid], targets[valid].long()] = True
+        if self.nc == 1:
+            self.nt_per_image[0] += int(present[:, 1].sum())
+        else:
+            self.nt_per_image += present[:, : self.nc].sum(0).cpu().numpy()
+
+    def process(self, save_dir: Path = Path("."), plot: bool = False, on_plot: callable | None = None) -> None:
+        """Compute final metrics from accumulated confusion matrix.
+
+        Args:
+            save_dir (Path): Directory to save plots. Defaults to Path('.').
+            plot (bool): Whether to plot IoU bars and confusion matrix. Defaults to False.
+            on_plot (callable, optional): Function to call after plots are generated. Defaults to None.
+        """
+        if self.matrix is None:
+            return
+
+        intersection = torch.diagonal(self.matrix)
+        union = self.matrix.sum(1) + self.matrix.sum(0) - intersection
+        iou = torch.where(union > 0, intersection / union, torch.zeros_like(intersection, dtype=torch.float32))
+        row_sum = self.matrix.sum(1)
+        pa = intersection / (row_sum + 1e-10)
+
+        if self.nc == 1:
+            self._miou = float(iou[1].item())
+            self._per_class_iou = iou[1:].cpu().numpy()
+            self._per_class_pixel_acc = pa[1:].cpu().numpy()
+            self.nt_per_class = np.array([row_sum[1].item()], dtype=np.int32)
+        else:
+            # Average IoU only over classes present in the ground truth; classes with no GT pixels (absent
+            # from the val set or removed by the `classes` filter) are excluded.
+            present = row_sum > 0
+            self._miou = float(iou[present].mean().item()) if present.any() else 0.0
+            self._per_class_iou = iou.cpu().numpy()
+            self._per_class_pixel_acc = pa.cpu().numpy()
+            self.nt_per_class = row_sum[: self.nc].cpu().numpy().astype(np.int32)
+
+        self._pixel_accuracy = float((intersection.sum() / (self.matrix.sum() + 1e-10)).item())
+
+        if plot:
+            self._plot_iou_bars(save_dir, on_plot)
+
+    def clear_stats(self):
+        """Clear accumulated statistics."""
+        self.matrix = None
+        self.nt_per_image.fill(0)
+
+    @property
+    def miou(self):
+        """Return mean IoU (foreground IoU only for binary segmentation)."""
+        return self._miou
+
+    @property
+    def pixel_accuracy(self):
+        """Return overall pixel accuracy."""
+        return self._pixel_accuracy
+
+    @property
+    def per_class_iou(self):
+        """Return per-class IoU values (foreground IoU only for binary segmentation)."""
+        return self._per_class_iou
+
+    @property
+    def per_class_pixel_accuracy(self):
+        """Return per-class pixel accuracy (diagonal / row sum for each class)."""
+        return self._per_class_pixel_acc
+
+    @property
+    def fitness(self):
+        """Return model fitness as mean IoU."""
+        return self.miou
+
+    @property
+    def keys(self):
+        """Return metric keys for logging."""
+        return ["metrics/mIoU", "metrics/pixel_acc"]
+
+    def mean_results(self):
+        """Return mean results for logging."""
+        return [self.miou, self.pixel_accuracy]
+
+    def class_result(self, i: int) -> list[float]:
+        """Return the result of evaluating the performance on a specific class."""
+        if self._per_class_iou is None or len(self._per_class_iou) == 0:
+            return [0.0, 0.0]
+        c = self.ap_class_index[i]
+        return [float(self._per_class_iou[c]), float(self._per_class_pixel_acc[c])]
+
+    @property
+    def ap_class_index(self):
+        """Return the indices of classes present in the ground truth for per-class reporting."""
+        return [i for i in range(self.nc) if self.nt_per_class[i] > 0]
+
+    @property
+    def results_dict(self):
+        """Return results dictionary."""
+        return dict(zip([*self.keys, "fitness"], [*self.mean_results(), self.fitness]))
+
+    @property
+    def curves(self):
+        """Return an empty list because semantic segmentation has no PR curves."""
+        return []
+
+    @property
+    def curves_results(self):
+        """Return empty list (no PR curve results)."""
+        return []
+
+    def summary(self, normalize: bool = True, decimals: int = 5) -> list[dict]:
+        """Generate a per-class summary of semantic segmentation metrics, with global mIoU and pixel accuracy on each
+        row.
+
+        Args:
+            normalize (bool): For semantic metrics, values are already in [0, 1].
+            decimals (int): Number of decimal places to round the metric values to.
+
+        Returns:
+            (list[dict]): A list of dictionaries, one per class, with per-class IoU and shared scalars.
+        """
+        miou = round(self.miou, decimals)
+        pixel_acc = round(self.pixel_accuracy, decimals)
+        per_class = self.per_class_iou
+        names = self.names or {i: str(i) for i in range(len(per_class))}
+        return [
+            {
+                "Class": names.get(c, str(c)),
+                "Images": int(self.nt_per_image[c]),
+                "Pixels": int(self.nt_per_class[c]),
+                "IoU": round(float(per_class[c]), decimals),
+                "mIoU": miou,
+                "pixel_acc": pixel_acc,
+            }
+            for c in self.ap_class_index
+        ]
+
+
+class DepthMetrics:
+    """Monocular depth estimation metrics: delta1-3, abs_rel, rmse, silog.
+
+    Per-image sums are computed on-device and accumulated in float64 on CPU, pooled over every valid pixel of the val
+    set (images with more valid pixels weigh proportionally more; this differs from protocols that average per-image
+    metrics). Following the standard Eigen evaluation protocol, pixels with gt outside (min_depth, max_depth) are
+    excluded and predictions are clamped into that range.
+
+    Attributes:
+        min_depth (float): Minimum valid depth in meters.
+        max_depth (float): Maximum valid depth in meters.
+    """
+
+    def __init__(
+        self,
+        min_depth: float = 0.001,
+        max_depth: float = 100.0,
+        align: str = "median",
+    ) -> None:
+        """Initialize depth metric accumulators.
+
+        Args:
+            min_depth (float): Minimum valid depth in meters; pixels with gt <= min_depth are ignored.
+            max_depth (float): Maximum valid depth in meters; pixels with gt >= max_depth are ignored and predictions
+                are clamped to it.
+            align (str): Per-image scale alignment before scoring, following the Depth Anything eval protocol. "median"
+                rescales each prediction by median(gt)/median(pred) so affine-invariant (scale-ambiguous) outputs are
+                comparable to metric GT; "none" disables alignment and scores predictions in their raw output scale.
+        """
+        self.min_depth = min_depth
+        self.max_depth = max_depth
+        self.align = align
+        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+        self._totals = None
+        self._count = 0.0
+        self._results = {}
+
+    def update_stats(self, preds: torch.Tensor, targets: torch.Tensor) -> None:
+        """Accumulate summed metrics over valid pixels, with per-image scale alignment.
+
+        Args:
+            preds (torch.Tensor): Predicted depth (B,1,H,W) or (B,H,W).
+            targets (torch.Tensor): Ground-truth depth in meters, same shape.
+        """
+        p = preds.squeeze(1) if preds.ndim == 4 else preds
+        g = targets.squeeze(1) if targets.ndim == 4 else targets
+        if p.ndim == 2:  # single image (H,W) -> (1,H,W) so alignment is always per-image
+            p, g = p[None], g[None]
+        for pi, gi in zip(p, g):
+            # Eigen protocol: score only pixels with gt inside (min_depth, max_depth); drop non-finite preds
+            mask = (gi > self.min_depth) & (gi < self.max_depth) & torch.isfinite(pi)
+            n = int(mask.sum())
+            if n == 0:
+                continue
+            pv = pi[mask].float()
+            gv = gi[mask].float()
+            if self.align == "median":
+                scale = torch.median(gv) / torch.median(pv.clamp_min(self.min_depth))
+                pv = pv * scale
+            pv = pv.clamp(self.min_depth, self.max_depth)
+            thresh = torch.maximum(pv / gv, gv / pv)
+            log_diff = torch.log(pv) - torch.log(gv)
+            totals = torch.stack(
+                [
+                    (thresh < 1.25).sum(),
+                    (thresh < 1.25**2).sum(),
+                    (thresh < 1.25**3).sum(),
+                    (torch.abs(pv - gv) / gv).sum(),
+                    ((pv - gv) ** 2).sum(),
+                    (log_diff**2).sum(),
+                    log_diff.sum(),
+                ]
+            )
+            if self._totals is None:
+                self._totals = torch.zeros(7, dtype=torch.float64)
+            self._totals += totals.cpu().double()  # float64 on CPU; MPS tensors cannot be float64
+            self._count += float(n)
+
+    def process(self, *args, **kwargs) -> None:
+        """Finalize metrics from accumulated sums."""
+        if self._totals is None or self._count == 0:
+            self._results = dict.fromkeys(self.keys, 0.0)
+            return
+        t = self._totals.cpu()
+        n = self._count
+        d1, d2, d3, abs_rel, rmse_sq, silog_a, silog_b = (float(x) for x in t)
+        silog = max((silog_a / n) - (silog_b / n) ** 2, 0.0) ** 0.5 * 100  # λ=1 variance form (ZoeDepth/KITTI)
+        self._results = {
+            "metrics/delta1": d1 / n,
+            "metrics/delta2": d2 / n,
+            "metrics/delta3": d3 / n,
+            "metrics/abs_rel": abs_rel / n,
+            "metrics/rmse": (rmse_sq / n) ** 0.5,
+            "metrics/silog": silog,
+        }
+
+    def clear_stats(self) -> None:
+        """Reset accumulators."""
+        self._totals = None
+        self._count = 0.0
+        self._results = {}
+
+    @property
+    def keys(self) -> list[str]:
+        """Metric keys for logging."""
+        return [
+            "metrics/delta1",
+            "metrics/delta2",
+            "metrics/delta3",
+            "metrics/abs_rel",
+            "metrics/rmse",
+            "metrics/silog",
+        ]
+
+    def mean_results(self) -> list[float]:
+        """Return metric values in `keys` order."""
+        return [self._results.get(k, 0.0) for k in self.keys]
+
+    @property
+    def delta1(self) -> float:
+        """Fraction of pixels with max(p/g, g/p) < 1.25."""
+        return self._results.get("metrics/delta1", 0.0)
+
+    @property
+    def delta2(self) -> float:
+        """Fraction of pixels with max(p/g, g/p) < 1.25**2."""
+        return self._results.get("metrics/delta2", 0.0)
+
+    @property
+    def delta3(self) -> float:
+        """Fraction of pixels with max(p/g, g/p) < 1.25**3."""
+        return self._results.get("metrics/delta3", 0.0)
+
+    @property
+    def abs_rel(self) -> float:
+        """Mean absolute relative error."""
+        return self._results.get("metrics/abs_rel", 0.0)
+
+    @property
+    def rmse(self) -> float:
+        """Root mean squared error (meters)."""
+        return self._results.get("metrics/rmse", 0.0)
+
+    @property
+    def silog(self) -> float:
+        """Scale-invariant logarithmic error (x100)."""
+        return self._results.get("metrics/silog", 0.0)
+
+    @property
+    def fitness(self) -> float:
+        """Fitness = delta1 (higher is better)."""
+        return self._results.get("metrics/delta1", 0.0)
+
+    @property
+    def results_dict(self) -> dict[str, float]:
+        """Results dict including fitness."""
+        return dict(zip([*self.keys, "fitness"], [*self.mean_results(), self.fitness]))
+
+    @property
+    def curves(self) -> list:
+        """No PR curves for depth."""
+        return []
+
+    @property
+    def curves_results(self) -> list:
+        """No PR curve results for depth."""
+        return []
+
+    def summary(self, normalize: bool = True, decimals: int = 5) -> list[dict]:
+        """Single-row summary of global depth metrics."""
+        return [{k.split("/")[-1]: round(v, decimals) for k, v in self._results.items()}]

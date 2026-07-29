@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Literal, Tuple
 from pydantic import BaseModel, Field
 
 
@@ -145,6 +145,69 @@ class TrackerConfig(BaseConfig):
         default=0.8, 
         description="Matching threshold for data association"
     )
+
+
+class ExporterConfig(BaseConfig):
+    """Configuration class for Ultralytics YOLO model export settings.
+    
+    Inherits strict extra field checking and type flexibilities from BaseConfig.
+    """
+    format: Literal[
+        "onnx", "torchscript", "engine", "openvino", "coreml", 
+        "saved_model", "pb", "tflite", "edgetpu", "tfjs", 
+        "paddle", "ncnn", "mnn"
+    ] = Field(
+        default="onnx", 
+        description="Target export format for deployment environment"
+    )
+    imgsz: Union[int, Tuple[int, int], List[int]] = Field(
+        default=640, 
+        description="Target image size for model input (e.g., 640 or (640, 480))"
+    )
+    quantize: Optional[Union[int, str]] = Field(
+        default=None, 
+        description="Quantization precision: 16 (FP16), 8/'int8' (INT8/PTQ), or None for FP32"
+    )
+    dynamic: bool = Field(
+        default=False, 
+        description="Enable dynamic input shape dimensions for formats like ONNX/TensorRT"
+    )
+    simplify: bool = Field(
+        default=True, 
+        description="Simplify model graph using tools like onnxslim"
+    )
+    opset: Optional[int] = Field(
+        default=None, 
+        description="ONNX opset version (uses latest supported by system if None)"
+    )
+    batch: int = Field(
+        default=1, 
+        description="Exported model batch size for inference"
+    )
+    nms: bool = Field(
+        default=False, 
+        description="Embed Non-Maximum Suppression (NMS) directly into the exported model graph"
+    )
+    device: Optional[Union[int, str]] = Field(
+        default=None, 
+        description="Device for export execution (e.g., 'cpu', 0, 'cuda:0')"
+    )
+    data: Optional[str] = Field(
+        default=None, 
+        description="Path to dataset YAML file (required for INT8 quantization calibration)"
+    )
+    fraction: float = Field(
+        default=1.0, 
+        description="Fraction of validation dataset to use for INT8 calibration"
+    )
+    workspace: Optional[float] = Field(
+        default=None, 
+        description="Maximum workspace memory allocation in GiB for TensorRT optimization"
+    )
+
+    def to_ultralytics_dict(self) -> dict:
+        """Converts config instance into a clean dictionary for model.export(**kwargs)."""
+        return self.model_dump(exclude_none=True)
 
 
 class AppConfig(BaseConfig):

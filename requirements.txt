@@ -6,3 +6,6 @@ pydantic
 psutil
 matplotlib
 Pillow
+requests
+pandas
+polars

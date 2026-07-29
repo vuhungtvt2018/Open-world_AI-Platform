@@ -6,6 +6,9 @@ from PIL import __version__ as pil_version
 import numpy as np
 
 import torch
+import torch.nn.functional as F
+
+from .check import check_version, is_ascii, check_font
 
 _SPECTRAL_R_ANCHORS = np.array(
     [
@@ -79,6 +82,47 @@ def colorize_depth(
     color = cv2.applyColorMap(idx, lut) if lut is not None else cv2.applyColorMap(idx, _DEPTH_CMAPS[cmap])  # BGR
     color[~valid] = 0
     return color
+
+
+def scale_masks(
+    masks: torch.Tensor,
+    shape: tuple[int, int],
+    ratio_pad: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    padding: bool = True,
+    mode: str = "bilinear",
+) -> torch.Tensor:
+    """Rescale segment masks to target shape.
+
+    Args:
+        masks (torch.Tensor): Masks with shape (N, C, H, W).
+        shape (tuple[int, int]): Target height and width as (height, width).
+        ratio_pad (tuple, optional): Ratio and padding values as ((ratio_h, ratio_w), (pad_w, pad_h)).
+        padding (bool): Whether masks are based on YOLO-style augmented images with padding.
+        mode (str): Interpolation mode, e.g. 'bilinear' for logits or 'nearest' for integer class maps.
+
+    Returns:
+        (torch.Tensor): Rescaled masks.
+    """
+    im1_h, im1_w = masks.shape[2:]
+    im0_h, im0_w = shape[:2]
+    if im1_h == im0_h and im1_w == im0_w:
+        return masks
+    if masks.shape[1] == 0:  # empty mask stack: F.interpolate rejects a 0-length channel dim
+        return masks.new_zeros((*masks.shape[:2], im0_h, im0_w), dtype=torch.float32)
+
+    if ratio_pad is None:  # calculate from im0_shape
+        gain = min(im1_h / im0_h, im1_w / im0_w)  # gain  = old / new
+        pad_w, pad_h = (im1_w - round(im0_w * gain)), (im1_h - round(im0_h * gain))  # wh padding
+        if padding:
+            pad_w /= 2
+            pad_h /= 2
+    else:
+        pad_w, pad_h = ratio_pad[1]
+    top, left = (round(pad_h - 0.1), round(pad_w - 0.1)) if padding else (0, 0)
+    bottom = im1_h - round(pad_h + 0.1)
+    right = im1_w - round(pad_w + 0.1)
+    return F.interpolate(masks[..., top:bottom, left:right].float(), shape, mode=mode)  # NCHW masks
+
 
 class Colors:
     """Ultralytics color palette for visualization and plotting.
@@ -438,7 +482,7 @@ class Annotator:
             self.im = cv2.addWeighted(self.im, 1 - alpha, overlay, alpha, 0)
         elif len(masks):
             # Use scale_masks to properly remove padding and upsample, convert bool to float first
-            masks = ops.scale_masks(masks[None].float(), self.im.shape[:2])[0] > 0.5
+            masks = scale_masks(masks[None].float(), self.im.shape[:2])[0] > 0.5
             colors = torch.tensor(colors, device=masks.device, dtype=torch.float32) / 255.0  # shape(n,3)
             colors = colors[:, None, None]  # shape(n,1,1,3)
             masks = masks.unsqueeze(3)  # shape(n,h,w,1)
