@@ -9,3 +9,4 @@ Pillow
 requests
 pandas
 polars
+tqdm

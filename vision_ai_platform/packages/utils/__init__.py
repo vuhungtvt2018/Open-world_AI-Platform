@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from contextlib import contextmanager
 import importlib.metadata
 import inspect
 import json
@@ -22,7 +23,6 @@ from urllib.parse import unquote
 import cv2
 import numpy as np
 import torch
-
 
 def env_bool(name: str, default: bool = False) -> bool:
     """Parse a boolean environment variable, accepting common truthy strings.
@@ -115,6 +115,164 @@ logging.getLogger("coremltools").setLevel(logging.ERROR)  # Suppress native bina
 FLOAT_OR_INT = (float, int)
 STR_OR_PATH = (str, Path)
 
+def emojis(string=""):
+    """Return platform-dependent emoji-safe version of string."""
+    return string.encode().decode("ascii", "ignore") if WINDOWS else string
+
+def set_logging(name="LOGGING_NAME", verbose=True):
+    """Set up logging with UTF-8 encoding and configurable verbosity.
+
+    This function configures logging for the Ultralytics library, setting the appropriate logging level and formatter
+    based on the verbosity flag and the current process rank. It handles special cases for Windows environments where
+    UTF-8 encoding might not be the default.
+
+    Args:
+        name (str): Name of the logger.
+        verbose (bool): Flag to set logging level to INFO if True, ERROR otherwise.
+
+    Returns:
+        (logging.Logger): Configured logger object.
+
+    Examples:
+        >>> set_logging(name="ultralytics", verbose=True)
+        >>> logger = logging.getLogger("ultralytics")
+        >>> logger.info("This is an info message")
+
+    Notes:
+        - On Windows, this function attempts to reconfigure stdout to use UTF-8 encoding if possible.
+        - If reconfiguration is not possible, it falls back to a custom formatter that handles non-UTF-8 environments.
+        - The function sets up a StreamHandler with the appropriate formatter and level.
+        - The logger's propagate flag is set to False to prevent duplicate logging in parent loggers.
+    """
+    level = logging.INFO if verbose and RANK in {-1, 0} else logging.ERROR  # rank in world for Multi-GPU trainings
+
+    class PrefixFormatter(logging.Formatter):
+        def format(self, record):
+            """Format log records with prefixes based on level."""
+            # Apply prefixes based on log level
+            if record.levelno == logging.WARNING:
+                prefix = "WARNING" if WINDOWS else "WARNING ⚠️"
+                record.msg = f"{prefix} {record.msg}"
+            elif record.levelno == logging.ERROR:
+                prefix = "ERROR" if WINDOWS else "ERROR ❌"
+                record.msg = f"{prefix} {record.msg}"
+
+            # Handle emojis in message based on platform
+            formatted_message = super().format(record)
+            return emojis(formatted_message)
+
+    formatter = PrefixFormatter("%(message)s")
+
+    # Handle Windows UTF-8 encoding issues
+    if WINDOWS and hasattr(sys.stdout, "encoding") and sys.stdout.encoding != "utf-8":
+        with contextlib.suppress(Exception):
+            # Attempt to reconfigure stdout to use UTF-8 encoding if possible
+            if hasattr(sys.stdout, "reconfigure"):
+                sys.stdout.reconfigure(encoding="utf-8")
+            # For environments where reconfigure is not available, wrap stdout in a TextIOWrapper
+            elif hasattr(sys.stdout, "buffer"):
+                import io
+
+                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
+    # Create and configure the StreamHandler with the appropriate formatter and level
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setFormatter(formatter)
+    stream_handler.setLevel(level)
+
+    # Set up the logger
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.addHandler(stream_handler)
+    logger.propagate = False
+    return logger
+
+
+# Set logger
+LOGGER = set_logging(LOGGING_NAME, verbose=VERBOSE)  # define globally (used in train.py, val.py, predict.py, etc.)
+logging.getLogger("sentry_sdk").setLevel(logging.CRITICAL + 1)
+
+class TryExcept(contextlib.ContextDecorator):
+    """Ultralytics TryExcept class for handling exceptions gracefully.
+
+    This class can be used as a decorator or context manager to catch exceptions and optionally print warning messages.
+    It allows code to continue execution even when exceptions occur, which is useful for non-critical operations.
+
+    Attributes:
+        msg (str): Optional message to display when an exception occurs.
+        verbose (bool): Whether to print the exception message.
+
+    Examples:
+        As a decorator:
+        >>> @TryExcept(msg="Error occurred in func", verbose=True)
+        ... def func():
+        ...     # Function logic here
+        ...     pass
+
+        As a context manager:
+        >>> with TryExcept(msg="Error occurred in block", verbose=True):
+        ...     # Code block here
+        ...     pass
+    """
+
+    def __init__(self, msg="", verbose=True):
+        """Initialize TryExcept class with optional message and verbosity settings."""
+        self.msg = msg
+        self.verbose = verbose
+
+    def __enter__(self):
+        """Execute when entering TryExcept context, initialize instance."""
+        pass
+
+    def __exit__(self, exc_type, value, traceback):
+        """Define behavior when exiting a 'with' block, print error message if necessary."""
+        if self.verbose and value:
+            LOGGER.warning(f"{self.msg}{': ' if self.msg else ''}{value}")
+        return True
+
+
+class Retry(contextlib.ContextDecorator):
+    """Retry class for function execution with exponential backoff.
+
+    This decorator can be used to retry a function on exceptions, up to a specified number of times with an
+    exponentially increasing delay between retries. It's useful for handling transient failures in network operations or
+    other unreliable processes.
+
+    Attributes:
+        times (int): Maximum number of retry attempts.
+        delay (int): Initial delay between retries in seconds.
+
+    Examples:
+        Example usage as a decorator:
+        >>> @Retry(times=3, delay=2)
+        ... def test_func():
+        ...     # Replace with function logic that may raise exceptions
+        ...     return True
+    """
+
+    def __init__(self, times=3, delay=2):
+        """Initialize Retry class with specified number of retries and delay."""
+        self.times = times
+        self.delay = delay
+        self._attempts = 0
+
+    def __call__(self, func):
+        """Decorator implementation for Retry with exponential backoff."""
+
+        def wrapped_func(*args, **kwargs):
+            """Apply retries to the decorated function or method."""
+            self._attempts = 0
+            while self._attempts < self.times:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    self._attempts += 1
+                    LOGGER.warning(f"Retry {self._attempts}/{self.times} failed: {e}")
+                    if self._attempts >= self.times:
+                        raise e
+                    time.sleep(self.delay * (2**self._attempts))  # exponential backoff delay
+
+        return wrapped_func
 
 def threaded(func):
     """Multi-thread a target function by default and return the thread or function result.
@@ -152,6 +310,37 @@ def threaded(func):
 
     return wrapper
 
+class ThreadingLocked:
+    """A decorator class for ensuring thread-safe execution of a function or method.
+
+    This class can be used as a decorator to make sure that if the decorated function is called from multiple threads,
+    only one thread at a time will be able to execute the function.
+
+    Attributes:
+        lock (threading.Lock): A lock object used to manage access to the decorated function.
+
+    Examples:
+        >>> from ultralytics.utils import ThreadingLocked
+        >>> @ThreadingLocked()
+        ... def my_function():
+        ...    # Your code here
+    """
+
+    def __init__(self):
+        """Initialize the decorator class with a threading lock."""
+        self.lock = threading.Lock()
+
+    def __call__(self, f):
+        """Run thread-safe execution of function or method."""
+        from functools import wraps
+
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            """Apply thread-safety to the decorated function or method."""
+            with self.lock:
+                return f(*args, **kwargs)
+
+        return decorated
 
 def read_device_model() -> str:
     """Read the device model information from the system.
@@ -273,6 +462,58 @@ def is_jetson(jetpack=None) -> bool:
             return False
     return jetson
 
+def is_dir_writeable(dir_path: str | Path) -> bool:
+    """Check if a directory is writable.
+
+    Args:
+        dir_path (str | Path): The path to the directory.
+
+    Returns:
+        (bool): True if the directory is writable, False otherwise.
+    """
+    return os.access(str(dir_path), os.W_OK)
+
+def get_user_config_dir(sub_dir="Ultralytics"):
+    """Return a writable config dir, preferring YOLO_CONFIG_DIR and being OS-aware.
+
+    Args:
+        sub_dir (str): The name of the subdirectory to create.
+
+    Returns:
+        (Path): The path to the user config directory.
+    """
+    if env_dir := os.getenv("YOLO_CONFIG_DIR"):
+        p = Path(env_dir).expanduser() / sub_dir
+    elif LINUX:
+        p = Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")) / sub_dir
+    elif WINDOWS:
+        p = Path.home() / "AppData" / "Roaming" / sub_dir
+    elif MACOS:
+        p = Path.home() / "Library" / "Application Support" / sub_dir
+    else:
+        raise ValueError(f"Unsupported operating system: {platform.system()}")
+
+    if p.exists():  # already created → trust it
+        return p
+    if is_dir_writeable(p.parent):  # create if possible
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+
+    # Fallbacks for Docker, GCP/AWS functions where only /tmp is writable
+    for alt in [Path("/tmp") / sub_dir, Path.cwd() / sub_dir]:
+        if alt.exists():
+            return alt
+        if is_dir_writeable(alt.parent):
+            alt.mkdir(parents=True, exist_ok=True)
+            LOGGER.warning(
+                f"user config directory '{p}' is not writable, using '{alt}'. Set YOLO_CONFIG_DIR to override."
+            )
+            return alt
+
+    # Last fallback → CWD
+    p = Path.cwd() / sub_dir
+    p.mkdir(parents=True, exist_ok=True)
+    return p
 
 DEVICE_MODEL = read_device_model()
 IS_COLAB = is_colab()
@@ -280,3 +521,85 @@ IS_KAGGLE = is_kaggle()
 IS_DOCKER = is_docker()
 IS_JUPYTER = is_jupyter()
 IS_JETSON = is_jetson()
+USER_CONFIG_DIR = get_user_config_dir()  # Ultralytics settings dir
+SETTINGS_FILE = USER_CONFIG_DIR / "settings.json"
+
+def colorstr(*input):
+    r"""Color a string based on the provided color and style arguments using ANSI escape codes.
+
+    This function can be called in two ways:
+        - colorstr('color', 'style', 'your string')
+        - colorstr('your string')
+
+    In the second form, 'blue' and 'bold' will be applied by default.
+
+    Args:
+        *input (str | Path): A sequence of strings where the first n-1 strings are color and style arguments, and the
+            last string is the one to be colored.
+
+    Returns:
+        (str): The input string wrapped with ANSI escape codes for the specified color and style.
+
+    Examples:
+        >>> colorstr("blue", "bold", "hello world")
+        "\033[34m\033[1mhello world\033[0m"
+
+    Notes:
+        Supported Colors and Styles:
+        - Basic Colors: 'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white'
+        - Bright Colors: 'bright_black', 'bright_red', 'bright_green', 'bright_yellow',
+                       'bright_blue', 'bright_magenta', 'bright_cyan', 'bright_white'
+        - Misc: 'end', 'bold', 'underline'
+
+    References:
+        https://en.wikipedia.org/wiki/ANSI_escape_code
+    """
+    *args, string = input if len(input) > 1 else ("blue", "bold", input[0])  # color arguments, string
+    colors = {
+        "black": "\033[30m",  # basic colors
+        "red": "\033[31m",
+        "green": "\033[32m",
+        "yellow": "\033[33m",
+        "blue": "\033[34m",
+        "magenta": "\033[35m",
+        "cyan": "\033[36m",
+        "white": "\033[37m",
+        "bright_black": "\033[90m",  # bright colors
+        "bright_red": "\033[91m",
+        "bright_green": "\033[92m",
+        "bright_yellow": "\033[93m",
+        "bright_blue": "\033[94m",
+        "bright_magenta": "\033[95m",
+        "bright_cyan": "\033[96m",
+        "bright_white": "\033[97m",
+        "end": "\033[0m",  # misc
+        "bold": "\033[1m",
+        "underline": "\033[4m",
+    }
+    return "".join(colors[x] for x in args) + f"{string}" + colors["end"]
+
+def clean_url(url):
+    """Strip auth from URL, i.e. `https://example.com/path/file.txt?auth` -> `https://example.com/path/file.txt`."""
+    url = Path(url).as_posix().replace(":/", "://")  # Pathlib turns :// -> :/, as_posix() for Windows
+    return unquote(url).split("?", 1)[0]  # '%2F' to '/', split authentication query strings
+
+def url2file(url):
+    """Convert URL to filename, i.e. `https://example.com/path/file.txt?auth` -> `file.txt`."""
+    return Path(clean_url(url)).name or "download"
+
+def is_online() -> bool:
+    """Fast online check using DNS (v4/v6) resolution (Cloudflare + Google).
+
+    Returns:
+        (bool): True if connection is successful, False otherwise.
+    """
+    if env_bool("YOLO_OFFLINE"):
+        return False
+
+    for host in ("one.one.one.one", "dns.google"):
+        try:
+            socket.getaddrinfo(host, 0, socket.AF_UNSPEC, 0, 0, socket.AI_ADDRCONFIG)
+            return True
+        except OSError:
+            continue
+    return False
