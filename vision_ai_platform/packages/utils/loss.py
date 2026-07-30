@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import math
-
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from .device_utils import autocast, TORCH_1_11
 
 def _get_covariance_matrix(boxes: torch.Tensor, floor: float = 0.0) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Generate covariance matrix from oriented bounding boxes.
@@ -94,6 +95,58 @@ def bbox_iou(
         return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
     return iou  # IoU
 
+def box_iou(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
+    """Compute IoU between two sets of bounding boxes (TLBR format)."""
+    if len(boxes1) == 0 or len(boxes2) == 0:
+        return np.zeros((len(boxes1), len(boxes2)), dtype=np.float32)
+
+    b1_x1, b1_y1, b1_x2, b1_y2 = np.split(boxes1, 4, axis=-1)
+    b2_x1, b2_y1, b2_x2, b2_y2 = np.split(boxes2, 4, axis=-1)
+
+    inter_x1 = np.maximum(b1_x1, b2_x1.T)
+    inter_y1 = np.maximum(b1_y1, b2_y1.T)
+    inter_x2 = np.minimum(b1_x2, b2_x2.T)
+    inter_y2 = np.minimum(b1_y2, b2_y2.T)
+
+    inter_w = np.maximum(0.0, inter_x2 - inter_x1)
+    inter_h = np.maximum(0.0, inter_y2 - inter_y1)
+    inter_area = inter_w * inter_h
+
+    area1 = (b1_x2 - b1_x1) * (b1_y2 - b1_y1)
+    area2 = (b2_x2 - b2_x1) * (b2_y2 - b2_y1)
+
+    union = area1 + area2.T - inter_area
+    return inter_area / np.maximum(union, 1e-6)
+
+
+def make_anchors(feats, strides, grid_cell_offset=0.5):
+    """Generate anchors from features."""
+    anchor_points, stride_tensor = [], []
+    assert feats is not None
+    dtype, device = feats[0].dtype, feats[0].device
+    for i in range(len(feats)):  # use len(feats) to avoid TracerWarning from iterating over strides tensor
+        stride = strides[i]
+        h, w = feats[i].shape[2:] if isinstance(feats, list) else (int(feats[i][0]), int(feats[i][1]))
+        sx = torch.arange(end=w, device=device, dtype=dtype) + grid_cell_offset  # shift x
+        sy = torch.arange(end=h, device=device, dtype=dtype) + grid_cell_offset  # shift y
+        sy, sx = torch.meshgrid(sy, sx, indexing="ij") if TORCH_1_11 else torch.meshgrid(sy, sx)
+        anchor_points.append(torch.stack((sx, sy), -1).view(-1, 2))
+        stride_tensor.append(torch.full((h * w, 1), stride, dtype=dtype, device=device))
+    return torch.cat(anchor_points), torch.cat(stride_tensor)
+
+
+def dist2bbox(distance, anchor_points, xywh=True, dim=-1):
+    """Transform distance(ltrb) to box(xywh or xyxy)."""
+    lt, rb = distance.chunk(2, dim)
+    x1y1 = anchor_points - lt
+    x2y2 = anchor_points + rb
+    if xywh:
+        c_xy = (x1y1 + x2y2) / 2
+        wh = x2y2 - x1y1
+        return torch.cat([c_xy, wh], dim)  # xywh bbox
+    return torch.cat((x1y1, x2y2), dim)  # xyxy bbox
+
+
 def bbox2dist(anchor_points: torch.Tensor, bbox: torch.Tensor, reg_max: int | None = None) -> torch.Tensor:
     """Transform bbox(xyxy) to dist(ltrb)."""
     x1y1, x2y2 = bbox.chunk(2, -1)
@@ -101,6 +154,26 @@ def bbox2dist(anchor_points: torch.Tensor, bbox: torch.Tensor, reg_max: int | No
     if reg_max is not None:
         dist = dist.clamp_(0, reg_max - 0.01)  # dist (lt, rb)
     return dist
+
+def dist2rbox(pred_dist, pred_angle, anchor_points, dim=-1):
+    """Decode predicted rotated bounding box coordinates from anchor points and distribution.
+
+    Args:
+        pred_dist (torch.Tensor): Predicted rotated distance with shape (bs, h*w, 4).
+        pred_angle (torch.Tensor): Predicted angle with shape (bs, h*w, 1).
+        anchor_points (torch.Tensor): Anchor points with shape (h*w, 2).
+        dim (int, optional): Dimension along which to split.
+
+    Returns:
+        (torch.Tensor): Predicted rotated bounding boxes with shape (bs, h*w, 4).
+    """
+    lt, rb = pred_dist.split(2, dim=dim)
+    cos, sin = torch.cos(pred_angle), torch.sin(pred_angle)
+    # (bs, h*w, 1)
+    xf, yf = ((rb - lt) / 2).split(1, dim=dim)
+    x, y = xf * cos - yf * sin, xf * sin + yf * cos
+    xy = torch.cat([x, y], dim=dim) + anchor_points
+    return torch.cat([xy, lt + rb], dim=dim)
 
 def rbox2dist(
     target_bboxes: torch.Tensor,
@@ -187,6 +260,43 @@ def probiou(
         return iou - v * alpha  # CIoU
     return iou
 
+
+def batch_probiou(obb1: torch.Tensor | np.ndarray, obb2: torch.Tensor | np.ndarray, eps: float = 1e-7) -> torch.Tensor:
+    """Calculate the probabilistic IoU between oriented bounding boxes.
+
+    Args:
+        obb1 (torch.Tensor | np.ndarray): A tensor of shape (N, 5) representing ground truth obbs, with xywhr format.
+        obb2 (torch.Tensor | np.ndarray): A tensor of shape (M, 5) representing predicted obbs, with xywhr format.
+        eps (float, optional): A small value to avoid division by zero.
+
+    Returns:
+        (torch.Tensor): A tensor of shape (N, M) representing obb similarities.
+
+    References:
+        https://arxiv.org/pdf/2106.06072v1.pdf
+    """
+    obb1 = torch.from_numpy(obb1) if isinstance(obb1, np.ndarray) else obb1
+    obb2 = torch.from_numpy(obb2) if isinstance(obb2, np.ndarray) else obb2
+
+    x1, y1 = obb1[..., :2].split(1, dim=-1)
+    x2, y2 = (x.squeeze(-1)[None] for x in obb2[..., :2].split(1, dim=-1))
+    a1, b1, c1 = _get_covariance_matrix(obb1)
+    a2, b2, c2 = (x.squeeze(-1)[None] for x in _get_covariance_matrix(obb2))
+
+    t1 = (
+        ((a1 + a2) * (y1 - y2).pow(2) + (b1 + b2) * (x1 - x2).pow(2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)
+    ) * 0.25
+    t2 = (((c1 + c2) * (x2 - x1) * (y1 - y2)) / ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2) + eps)) * 0.5
+    t3 = (
+        ((a1 + a2) * (b1 + b2) - (c1 + c2).pow(2))
+        / (4 * ((a1 * b1 - c1.pow(2)).clamp_(0) * (a2 * b2 - c2.pow(2)).clamp_(0)).sqrt() + eps)
+        + eps
+    ).log() * 0.5
+    bd = (t1 + t2 + t3).clamp(eps, 100.0)
+    hd = (1.0 - (-bd).exp() + eps).sqrt()
+    return 1 - hd
+
+
 class VarifocalLoss(nn.Module):
     """Varifocal loss by Zhang et al.
 
@@ -210,7 +320,7 @@ class VarifocalLoss(nn.Module):
     def forward(self, pred_score: torch.Tensor, gt_score: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
         """Compute varifocal loss between predictions and ground truth."""
         weight = self.alpha * pred_score.sigmoid().pow(self.gamma) * (1 - label) + gt_score * label
-        with torch.amp.autocast(enabled=False):
+        with autocast(enabled=False):
             loss = (
                 (F.binary_cross_entropy_with_logits(pred_score.float(), gt_score.float(), reduction="none") * weight)
                 .mean(1)

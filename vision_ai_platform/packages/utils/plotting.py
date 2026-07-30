@@ -14,6 +14,7 @@ from PIL import __version__ as pil_version
 from . import threaded
 from .logger import LOGGER
 from .annotator import colors, Annotator
+from .ops import xywhr2xyxyxyxy, xywh2xyxy
 
 def _gaussian_filter1d(y, sigma: int = 3, truncate: float = 4.0) -> np.ndarray:
     """Smooth a 1D array with a Gaussian kernel (NumPy replacement for scipy.ndimage.gaussian_filter1d).
@@ -32,58 +33,6 @@ def _gaussian_filter1d(y, sigma: int = 3, truncate: float = 4.0) -> np.ndarray:
     kernel /= kernel.sum()
     # scipy 'reflect' boundary mode is equivalent to NumPy 'symmetric'
     return np.convolve(np.pad(y, radius, mode="symmetric"), kernel, mode="valid")
-
-
-def xywhr2xyxyxyxy(x):
-    """Convert batched Oriented Bounding Boxes (OBB) from [xywh, rotation] to [xy1, xy2, xy3, xy4] format.
-
-    Args:
-        x (np.ndarray | torch.Tensor): Boxes in [cx, cy, w, h, rotation] format with shape (N, 5) or (B, N, 5). Rotation
-            values should be in radians from [-pi/4, 3pi/4).
-
-    Returns:
-        (np.ndarray | torch.Tensor): Converted corner points with shape (N, 4, 2) or (B, N, 4, 2).
-    """
-    cos, sin, cat, stack = (
-        (torch.cos, torch.sin, torch.cat, torch.stack)
-        if isinstance(x, torch.Tensor)
-        else (np.cos, np.sin, np.concatenate, np.stack)
-    )
-
-    ctr = x[..., :2]
-    w, h, angle = (x[..., i : i + 1] for i in range(2, 5))
-    cos_value, sin_value = cos(angle), sin(angle)
-    vec1 = [w / 2 * cos_value, w / 2 * sin_value]
-    vec2 = [-h / 2 * sin_value, h / 2 * cos_value]
-    vec1 = cat(vec1, -1)
-    vec2 = cat(vec2, -1)
-    pt1 = ctr + vec1 + vec2
-    pt2 = ctr + vec1 - vec2
-    pt3 = ctr - vec1 - vec2
-    pt4 = ctr - vec1 + vec2
-    return stack([pt1, pt2, pt3, pt4], -2)
-
-
-def xywh2xyxy(x):
-    """Convert bounding box coordinates from (x, y, width, height) format to (x1, y1, x2, y2) format where (x1, y1) is
-    the top-left corner and (x2, y2) is the bottom-right corner. Note: ops per 2 channels faster than per channel.
-
-    Args:
-        x (np.ndarray | torch.Tensor): Input bounding box coordinates in (x, y, width, height) format.
-
-    Returns:
-        (np.ndarray | torch.Tensor): Bounding box coordinates in (x1, y1, x2, y2) format.
-    """
-    assert x.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {x.shape}"
-    if isinstance(x, torch.Tensor):
-        y = torch.empty_like(x)
-    else:
-        y = np.empty_like(x)
-    xy = x[..., :2]  # centers
-    wh = x[..., 2:] / 2  # half width-height
-    y[..., :2] = xy - wh  # top left xy
-    y[..., 2:] = xy + wh  # bottom right xy
-    return y
 
 
 class Plotter:
@@ -484,3 +433,42 @@ class Plotter:
         annotator.im.save(save_path)  # save
         if on_plot:
             on_plot(save_path)
+
+    def feature_visualization(
+        self,
+        x,
+        module_type: str,
+        stage: int,
+        n: int = 32
+    ):
+        """Visualize feature maps of a given model module during inference.
+
+        Args:
+            x (torch.Tensor): Features to be visualized.
+            module_type (str): Module type.
+            stage (int): Module stage within the model.
+            n (int, optional): Maximum number of feature maps to plot.
+        """
+        import matplotlib.pyplot as plt
+
+        for m in ("Detect", "Segment", "Pose", "Classify", "OBB", "RTDETRDecoder"):  # all model heads
+            if m in module_type:
+                return
+        if isinstance(x, torch.Tensor):
+            _, channels, height, width = x.shape  # batch, channels, height, width
+            if height > 1 and width > 1:
+                f = self.save_dir / "detect" / "exp" / f"stage{stage}_{module_type.rsplit('.', 1)[-1]}_features.png"  # filename
+
+                blocks = torch.chunk(x[0].cpu(), channels, dim=0)  # select batch index 0, block by channels
+                n = min(n, channels)  # number of plots
+                _, ax = plt.subplots(math.ceil(n / 8), 8, tight_layout=True)  # n/8 rows x 8 cols
+                ax = ax.ravel()
+                plt.subplots_adjust(wspace=0.05, hspace=0.05)
+                for i in range(n):
+                    ax[i].imshow(blocks[i].squeeze())  # cmap='gray'
+                    ax[i].axis("off")
+
+                LOGGER.info(f"Saving {f}... ({n}/{channels})")
+                plt.savefig(f, dpi=300, bbox_inches="tight")
+                plt.close()
+                np.save(str(f.with_suffix(".npy")), x[0].cpu().numpy())  # npy save

@@ -234,3 +234,35 @@ class BaseTracker(ABC):
         res_a = [t for t in a_stracks if t not in dupa]
         res_b = [t for t in b_stracks if t not in dupb]
         return res_a, res_b
+
+    def merge_track_pools(self, activated: list, refind: list, lost: list, removed: list, removed_buffer: int=1000):
+        """Apply the standard end-of-frame bookkeeping to a tracker's persistent pools in place.
+
+        Merges newly activated and re-found tracks into `tracked_stracks`, moves the transitioned tracks into
+        `lost_stracks`, dedups by IoU, appends removals to `removed_stracks`, and trims the removed buffer
+        to `removed_buffer` entries.
+
+        Args:
+            activated (list): Tracks updated from the Tracked state this frame.
+            refind (list): Tracks re-activated from the Lost state this frame.
+            lost (list): Tracks transitioned to Lost this frame.
+            removed (list): Tracks transitioned to Removed this frame.
+            removed_buffer (int): Maximum number of historical removed tracks to retain.
+        """
+        self.tracked_stracks = [t for t in self.tracked_stracks if t.state == TrackState.Tracked]
+        self.tracked_stracks = BaseTracker.joint_stracks(self.tracked_stracks, activated)
+        self.tracked_stracks = BaseTracker.joint_stracks(self.tracked_stracks, refind)
+
+        self.lost_stracks = BaseTracker.sub_stracks(self.lost_stracks, self.tracked_stracks)
+        new_lost = [t for t in lost if t not in self.lost_stracks]
+        self.lost_stracks.extend(new_lost)
+        new_removed = [t for t in removed if t not in self.removed_stracks]
+        self.removed_stracks.extend(new_removed)
+        self.lost_stracks = BaseTracker.sub_stracks(self.lost_stracks, self.removed_stracks)
+
+        self.tracked_stracks, self.lost_stracks = BaseTracker.remove_duplicate_stracks(
+            self.tracked_stracks, self.lost_stracks
+        )
+        
+        if len(self.removed_stracks) > removed_buffer:
+            self.removed_stracks = self.removed_stracks[-removed_buffer:]

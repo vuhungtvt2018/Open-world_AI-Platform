@@ -24,6 +24,8 @@ import cv2
 import numpy as np
 import torch
 
+from vision_ai_platform.packages.utils.git import GitRepo
+
 def env_bool(name: str, default: bool = False) -> bool:
     """Parse a boolean environment variable, accepting common truthy strings.
 
@@ -55,7 +57,9 @@ FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLO
 ASSETS = ROOT / "assets"  # default images
 ASSETS_URL = "https://github.com/ultralytics/assets/releases/download/v0.0.0"  # assets GitHub URL
+PLATFORM_URL = os.getenv("ULTRALYTICS_PLATFORM_URL", "https://platform.ultralytics.com").rstrip("/")
 NUM_THREADS = min(8, max(1, os.cpu_count() - 1))  # number of YOLO multiprocessing threads
+AUTOINSTALL = env_bool("YOLO_AUTOINSTALL", True)
 VERBOSE = env_bool("GLOB_VERBOSE", True)  # global verbose mode
 SAFE_LOAD = env_bool("MODEL_SAFE_LOAD")  # opt-in weights_only model loading
 LOGGING_NAME = "vision_ai_platform"
@@ -462,6 +466,23 @@ def is_jetson(jetpack=None) -> bool:
             return False
     return jetson
 
+def is_online() -> bool:
+    """Fast online check using DNS (v4/v6) resolution (Cloudflare + Google).
+
+    Returns:
+        (bool): True if connection is successful, False otherwise.
+    """
+    if env_bool("YOLO_OFFLINE"):
+        return False
+
+    for host in ("one.one.one.one", "dns.google"):
+        try:
+            socket.getaddrinfo(host, 0, socket.AF_UNSPEC, 0, 0, socket.AI_ADDRCONFIG)
+            return True
+        except OSError:
+            continue
+    return False
+
 def is_dir_writeable(dir_path: str | Path) -> bool:
     """Check if a directory is writable.
 
@@ -515,14 +536,34 @@ def get_user_config_dir(sub_dir="Ultralytics"):
     p.mkdir(parents=True, exist_ok=True)
     return p
 
+def is_pytest_running():
+    """Determine whether pytest is currently running or not.
+
+    Returns:
+        (bool): True if pytest is running, False otherwise.
+    """
+    return ("PYTEST_CURRENT_TEST" in os.environ) or ("pytest" in sys.modules) or ("pytest" in Path(ARGV[0]).stem)
+
+
+def is_github_action_running() -> bool:
+    """Determine if the current environment is a GitHub Actions runner.
+
+    Returns:
+        (bool): True if the current environment is a GitHub Actions runner, False otherwise.
+    """
+    return "GITHUB_ACTIONS" in os.environ and "GITHUB_WORKFLOW" in os.environ and "RUNNER_OS" in os.environ
+
 DEVICE_MODEL = read_device_model()
+ONLINE = is_online()
 IS_COLAB = is_colab()
 IS_KAGGLE = is_kaggle()
 IS_DOCKER = is_docker()
 IS_JUPYTER = is_jupyter()
 IS_JETSON = is_jetson()
+GIT = GitRepo()
 USER_CONFIG_DIR = get_user_config_dir()  # Ultralytics settings dir
 SETTINGS_FILE = USER_CONFIG_DIR / "settings.json"
+PLATFORM_API_URL = os.getenv("PLATFORM_API_URL", f"{PLATFORM_URL}/api/webhooks")
 
 def colorstr(*input):
     r"""Color a string based on the provided color and style arguments using ANSI escape codes.
@@ -587,19 +628,325 @@ def url2file(url):
     """Convert URL to filename, i.e. `https://example.com/path/file.txt?auth` -> `file.txt`."""
     return Path(clean_url(url)).name or "download"
 
-def is_online() -> bool:
-    """Fast online check using DNS (v4/v6) resolution (Cloudflare + Google).
+def resolve_platform_uri(uri, hard=True):
+    """Resolve ul:// URIs to signed URLs by authenticating with Ultralytics Platform.
+
+    Formats:
+        ul://username/datasets/slug  -> Returns signed URL to NDJSON file
+        ul://username/project/model  -> Returns signed URL to .pt file
+
+    Args:
+        uri (str): Platform URI starting with "ul://".
+        hard (bool): Whether to raise an error if resolution fails.
 
     Returns:
-        (bool): True if connection is successful, False otherwise.
-    """
-    if env_bool("YOLO_OFFLINE"):
-        return False
+        (str | None): Signed URL on success, None if not found and hard=False.
 
-    for host in ("one.one.one.one", "dns.google"):
+    Raises:
+        ValueError: If API key is missing/invalid or URI format is wrong.
+        PermissionError: If access is denied.
+        RuntimeError: If resource is not ready (e.g., dataset still processing).
+        FileNotFoundError: If resource not found and hard=True.
+        ConnectionError: If network request fails and hard=True.
+    """
+    import requests
+
+    path = uri[5:]  # Remove "ul://"
+    parts = path.split("/")
+
+    api_key = os.getenv("ULTRALYTICS_API_KEY") or SETTINGS.get("api_key")
+    if not api_key:
+        raise ValueError(f"ULTRALYTICS_API_KEY required for '{uri}'. Get key at {PLATFORM_URL}/settings")
+
+    base = PLATFORM_API_URL
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    # ul://username/datasets/slug
+    if len(parts) == 3 and parts[1] == "datasets":
+        username, _, slug = parts
+        url = f"{base}/datasets/{username}/{slug}/export"
+
+    # ul://username/project/model
+    elif len(parts) == 3:
+        username, project, model = parts
+        url = f"{base}/models/{username}/{project}/{model}/download"
+
+    else:
+        raise ValueError(f"Invalid platform URI: {uri}. Use ul://user/datasets/name or ul://user/project/model")
+
+    # (connect_timeout, read_timeout) — short connect so retries are fast, long read for server-side generation
+    timeout = (10, 3600) if "/datasets/" in url else (10, 90)
+
+    try:
+        for attempt in range(5):
+            try:
+                r = requests.head(url, headers=headers, allow_redirects=False, timeout=timeout)
+                if r.status_code in {408, 429} or r.status_code >= 500:
+                    raise requests.exceptions.HTTPError(f"HTTP {r.status_code}", response=r)
+                break
+            except (
+                requests.exceptions.ConnectionError,
+                requests.exceptions.ReadTimeout,
+                requests.exceptions.HTTPError,
+            ) as e:
+                if attempt >= 4:
+                    raise
+                delay = 2 * (2**attempt)  # 2s, 4s, 8s, 16s backoff
+                LOGGER.warning(f"Retry {attempt + 1}/5 for {uri} in {delay}s: {e}")
+                time.sleep(delay)
+    except Exception as e:
+        if hard:
+            raise ConnectionError(f"Failed to resolve {uri}: {e}") from e
+        LOGGER.warning(f"Failed to resolve {uri}: {e}")
+        return None
+
+    # Handle redirect responses (301, 302, 303, 307, 308)
+    if 300 <= r.status_code < 400 and "location" in r.headers:
+        return r.headers["location"]  # Return signed URL
+
+    # Handle error responses
+    if r.status_code == 401:
+        raise ValueError(f"Invalid ULTRALYTICS_API_KEY for '{uri}'")
+    if r.status_code == 403:
+        raise PermissionError(f"Access denied for '{uri}'. Check dataset/model visibility settings.")
+    if r.status_code == 404:
+        if hard:
+            raise FileNotFoundError(f"Not found on platform: {uri}")
+        LOGGER.warning(f"Not found on platform: {uri}")
+        return None
+    if r.status_code == 409:
+        raise RuntimeError(f"Resource not ready: {uri}. Dataset may still be processing.")
+
+    # Unexpected response
+    r.raise_for_status()
+    raise RuntimeError(f"Unexpected response from platform for '{uri}': {r.status_code}")
+
+class JSONDict(dict):
+    """A dictionary-like class that provides JSON persistence for its contents.
+
+    This class extends the built-in dictionary to automatically save its contents to a JSON file whenever they are
+    modified. It ensures thread-safe operations using a lock and handles JSON serialization of Path objects.
+
+    Attributes:
+        file_path (Path): The path to the JSON file used for persistence.
+        lock (threading.Lock): A lock object to ensure thread-safe operations.
+
+    Methods:
+        _load: Load the data from the JSON file into the dictionary.
+        _save: Save the current state of the dictionary to the JSON file.
+        __setitem__: Store a key-value pair and persist it to disk.
+        __delitem__: Remove an item and update the persistent storage.
+        update: Update the dictionary and persist changes.
+        clear: Clear all entries and update the persistent storage.
+
+    Examples:
+        >>> json_dict = JSONDict("data.json")
+        >>> json_dict["key"] = "value"
+        >>> print(json_dict["key"])
+        value
+        >>> del json_dict["key"]
+        >>> json_dict.update({"new_key": "new_value"})
+        >>> json_dict.clear()
+    """
+
+    def __init__(self, file_path: str | Path = "data.json"):
+        """Initialize a JSONDict object with a specified file path for JSON persistence."""
+        super().__init__()
+        self.file_path = Path(file_path)
+        self.lock = Lock()
+        self._load()
+
+    def _load(self):
+        """Load the data from the JSON file into the dictionary."""
         try:
-            socket.getaddrinfo(host, 0, socket.AF_UNSPEC, 0, 0, socket.AI_ADDRCONFIG)
-            return True
-        except OSError:
-            continue
-    return False
+            if self.file_path.exists():
+                with open(self.file_path) as f:
+                    # Use the base dict update to avoid persisting during reads
+                    super().update(json.load(f))
+        except json.JSONDecodeError:
+            LOGGER.warning(f"Error decoding JSON from {self.file_path}. Starting with an empty dictionary.")
+        except Exception as e:
+            LOGGER.error(f"Error reading from {self.file_path}: {e}")
+
+    def _save(self):
+        """Save the current state of the dictionary to the JSON file."""
+        try:
+            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.file_path, "w", encoding="utf-8") as f:
+                json.dump(dict(self), f, indent=2, default=self._json_default)
+        except Exception as e:
+            LOGGER.error(f"Error writing to {self.file_path}: {e}")
+
+    @staticmethod
+    def _json_default(obj):
+        """Handle JSON serialization of Path objects."""
+        if isinstance(obj, Path):
+            return str(obj)
+        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+    def __setitem__(self, key, value):
+        """Store a key-value pair and persist to disk."""
+        with self.lock:
+            super().__setitem__(key, value)
+            self._save()
+
+    def __delitem__(self, key):
+        """Remove an item and update the persistent storage."""
+        with self.lock:
+            super().__delitem__(key)
+            self._save()
+
+    def __str__(self):
+        """Return a pretty-printed JSON string representation of the dictionary."""
+        contents = json.dumps(dict(self), indent=2, ensure_ascii=False, default=self._json_default)
+        return f'JSONDict("{self.file_path}"):\n{contents}'
+
+    def update(self, *args, **kwargs):
+        """Update the dictionary and persist changes."""
+        with self.lock:
+            super().update(*args, **kwargs)
+            self._save()
+
+    def clear(self):
+        """Clear all entries and update the persistent storage."""
+        with self.lock:
+            super().clear()
+            self._save()
+
+
+class SettingsManager(JSONDict):
+    """SettingsManager class for managing and persisting Ultralytics settings.
+
+    This class extends JSONDict to provide JSON persistence for settings, ensuring thread-safe operations and default
+    values. It validates settings on initialization and provides methods to update or reset settings. The settings
+    include directories for datasets, weights, and runs, as well as various integration flags.
+
+    Attributes:
+        file (Path): The path to the JSON file used for persistence.
+        version (str): The version of the settings schema.
+        defaults (dict): A dictionary containing default settings.
+        help_msg (str): A help message for users on how to view and update settings.
+
+    Methods:
+        _validate_settings: Validate the current settings and reset if necessary.
+        update: Update settings, validating keys and types.
+        reset: Reset the settings to default and save them.
+
+    Examples:
+        Initialize and update settings:
+        >>> settings = SettingsManager()
+        >>> settings.update(runs_dir="/new/runs/dir")
+        >>> print(settings["runs_dir"])
+        /new/runs/dir
+    """
+
+    def __init__(self, file=SETTINGS_FILE, version="0.0.6"):
+        """Initialize the SettingsManager with default settings and load user settings."""
+        import hashlib
+        import uuid
+
+        from vision_ai_platform.packages.utils.device_utils import torch_distributed_zero_first
+
+        root = GIT.root or Path()
+        datasets_root = (root.parent if GIT.root and is_dir_writeable(root.parent) else root).resolve()
+
+        self.file = Path(file)
+        self.version = version
+        self.defaults = {
+            "settings_version": version,  # Settings schema version
+            "datasets_dir": str(datasets_root / "datasets"),  # Datasets directory
+            "weights_dir": str(root / "weights"),  # Model weights directory
+            "runs_dir": str(root / "runs"),  # Experiment runs directory
+            "uuid": hashlib.sha256(str(uuid.getnode()).encode()).hexdigest(),  # SHA-256 anonymized UUID hash
+            "sync": True,  # Enable synchronization
+            "api_key": "",  # Ultralytics API Key
+            "openai_api_key": "",  # OpenAI API Key
+            "clearml": True,  # ClearML integration
+            "comet": True,  # Comet integration
+            "dvc": True,  # DVC integration
+            "hub": True,  # Ultralytics HUB integration
+            "mlflow": True,  # MLflow integration
+            "neptune": True,  # Neptune integration
+            "raytune": True,  # Ray Tune integration
+            "tensorboard": False,  # TensorBoard logging
+            "wandb": False,  # Weights & Biases logging
+            "vscode_msg": True,  # VSCode message
+            "openvino_msg": True,  # OpenVINO export on Intel CPU message
+        }
+
+        self.help_msg = (
+            f"\nView Ultralytics Settings with 'yolo settings' or at '{self.file}'"
+            "\nUpdate Settings with 'yolo settings key=value', i.e. 'yolo settings runs_dir=path/to/dir'. "
+            "For help see https://docs.ultralytics.com/quickstart/#ultralytics-settings."
+        )
+
+        with torch_distributed_zero_first(LOCAL_RANK):
+            super().__init__(self.file)
+
+            if not self.file.exists() or not self:  # Check if file doesn't exist or is empty
+                LOGGER.info(f"Creating new Ultralytics Settings v{version} file ✅ {self.help_msg}")
+                self.reset()
+
+            self._validate_settings()
+
+    def _validate_settings(self):
+        """Validate the current settings and reset if necessary."""
+        correct_keys = frozenset(self.keys()) == frozenset(self.defaults.keys())
+        correct_types = all(isinstance(self.get(k), type(v)) for k, v in self.defaults.items())
+        correct_version = self.get("settings_version", "") == self.version
+
+        if not (correct_keys and correct_types and correct_version):
+            LOGGER.warning(
+                "Ultralytics settings reset to default values. This may be due to a possible problem "
+                f"with your settings or a recent ultralytics package update. {self.help_msg}"
+            )
+            self.reset()
+
+        if self.get("datasets_dir") == self.get("runs_dir"):
+            LOGGER.warning(
+                f"Ultralytics setting 'datasets_dir: {self.get('datasets_dir')}' "
+                f"must be different than 'runs_dir: {self.get('runs_dir')}'. "
+                f"Please change one to avoid possible issues during training. {self.help_msg}"
+            )
+
+    def __setitem__(self, key, value):
+        """Update one key: value pair."""
+        self.update({key: value})
+
+    def update(self, *args, **kwargs):
+        """Update settings, validating keys and types."""
+        for arg in args:
+            if isinstance(arg, dict):
+                kwargs.update(arg)
+        for k, v in kwargs.items():
+            if k not in self.defaults:
+                raise KeyError(f"No Ultralytics setting '{k}'. {self.help_msg}")
+            t = type(self.defaults[k])
+            if not isinstance(v, t):
+                raise TypeError(
+                    f"Ultralytics setting '{k}' must be '{t.__name__}' type, not '{type(v).__name__}'. {self.help_msg}"
+                )
+        super().update(*args, **kwargs)
+
+    def reset(self):
+        """Reset the settings to default and save them."""
+        self.clear()
+        self.update(self.defaults)
+
+SETTINGS = SettingsManager()
+PERSISTENT_CACHE = JSONDict(USER_CONFIG_DIR / "persistent_cache.json")  # initialize persistent cache
+DATASETS_DIR = Path(SETTINGS["datasets_dir"])  # global datasets directory
+WEIGHTS_DIR = Path(SETTINGS["weights_dir"])  # global weights directory
+RUNS_DIR = Path(SETTINGS["runs_dir"])  # global runs directory
+ENVIRONMENT = (
+    "Colab"
+    if IS_COLAB
+    else "Kaggle"
+    if IS_KAGGLE
+    else "Jupyter"
+    if IS_JUPYTER
+    else "Docker"
+    if IS_DOCKER
+    else platform.system()
+)
+TESTS_RUNNING = is_pytest_running() or is_github_action_running()

@@ -10,3 +10,7 @@ requests
 pandas
 polars
 tqdm
+scipy
+pyyaml
+pynvml
+thop

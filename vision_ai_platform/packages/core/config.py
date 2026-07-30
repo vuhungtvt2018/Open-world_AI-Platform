@@ -1,5 +1,6 @@
 from typing import List, Dict, Optional, Union, Literal, Tuple
 from pydantic import BaseModel, Field
+import yaml
 
 
 class BaseConfig(BaseModel):
@@ -7,6 +8,18 @@ class BaseConfig(BaseModel):
     class Config:
         arbitrary_types_allowed = True
         extra = "forbid"
+
+
+class DatasetConfig(BaseConfig):
+    """Configuration for dataset"""
+    data_path: str = Field(description="Path to dataset")
+    dataset_type: str = Field(
+        description=(
+            "Dataset type: 'yolo', 'depth', 'yolo-multimodal', "
+            "'grounding', 'yolo-concat', 'semantic', "
+            "'polygon-semantic', 'classification'"
+        )
+    )
 
 
 class ModelConfig(BaseConfig):
@@ -87,18 +100,28 @@ class PredictorConfig(BaseConfig):
 
 class TrainerConfig(BaseConfig):
     """Configuration for training models."""
+    save_dir: str = Field(default="run", description="Directory path to save training results")
     epochs: int = Field(default=100, ge=1, description="Number of training epochs")
+    save_period: int = Field(default=10, ge=1, description="Save checkpoint every N epochs")
+    amp: bool = Field(default=True, description="Automatic Mixed Precision (AMP) training")
     batch_size: int = Field(default=16, ge=-1, alias="batch", description="Batch size (-1 for AutoBatch)")
+    resume: bool = Field(default=False, description="Resume training from last checkpoint in the run dir")
     optimizer: str = Field(
         default="auto", 
-        description="Optimizer choice: 'SGD', 'Adam', 'AdamW', 'RMSProp', or 'auto'"
+        description="Optimizer choice: 'SGD', 'MuSGD', 'Adam', 'Adamax', 'AdamW', 'NAdam', 'RAdam', 'RMSProp', or 'auto'"
     )
     lr0: float = Field(default=0.01, gt=0.0, description="Initial learning rate")
     lrf: float = Field(default=0.01, gt=0.0, description="Final learning rate fraction (lr0 * lrf)")
-    momentum: float = Field(default=0.937, ge=0.0, le=1.0, description="SGD momentum/Adam beta1")
+    alpha: float = Field(default=0.99, gt=0.0, description="RMSProp alpha")
+    beta1: float = Field(default=0.9, gt=0.0, description="Adam/AdamW beta1")
+    beta2: float = Field(default=0.99, gt=0.0, description="Adam/AdamW beta2")
+    momentum: float = Field(default=0.937, ge=0.0, le=1.0, description="SGD momentum")
     weight_decay: float = Field(default=0.0005, ge=0.0, description="Optimizer weight decay")
+    eps: float = Field(default=1e-8, ge=0.0, description="Epsilon to avoid division by 0")
     warmup_epochs: float = Field(default=3.0, ge=0.0, description="Warmup epochs")
+    warmup_bias_lr: float = Field(default=0.1, ge=0.0, description="Bias learning rate during warmup")
     patience: int = Field(default=50, ge=0, description="Early stopping patience (epochs without improvement)")
+    cos_lr: bool = Field(default=False, description="Use cosine learning rate scheduler")
     
     # Common Data Augmentations (Ultralytics defaults)
     hsv_h: float = Field(default=0.015, ge=0.0, le=1.0, description="HSV-Hue augmentation fraction")
@@ -223,3 +246,29 @@ class AppConfig(BaseConfig):
     trainer: TrainerConfig = Field(default_factory=TrainerConfig)
     evaluator: EvaluatorConfig = Field(default_factory=EvaluatorConfig)
     tracker: TrackerConfig = Field(default_factory=TrackerConfig)
+
+
+def get_config_from_yaml(config_file: str, config_type: str):
+    with open(config_file, "r", encoding="utf-8") as f:
+        config_dict = yaml.safe_load(f)
+    if config_type == "model":
+        return ModelConfig.model_validate(config_dict)
+    elif config_type == "predictor":
+        return PredictorConfig.model_validate(config_dict)
+    elif config_type == "trainer":
+        return TrainerConfig.model_validate(config_dict)
+    elif config_type == "evaluator":
+        return EvaluatorConfig.model_validate(config_dict)
+    elif config_type == "tracker":
+        return TrackerConfig.model_validate(config_dict)
+    elif config_type == "exporter":
+        return ExporterConfig.model_validate(config_dict)
+    elif config_type == "dataset":
+        return DatasetConfig.model_validate(config_dict)
+    elif config_type == "app":
+        return AppConfig.model_validate(config_dict)
+    else:
+        raise ValueError(
+            "Value of config_type must be in the following list: "
+            "['model', 'predictor', 'trainer', 'evaluator', 'tracker', 'exporter', 'dataset', 'app']"
+        )

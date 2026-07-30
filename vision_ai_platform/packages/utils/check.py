@@ -25,12 +25,15 @@ import torch
 from . import (
     ARM64,
     ASSETS_URL,
+    AUTOINSTALL,
     IS_COLAB,
     IS_DOCKER,
     IS_KAGGLE,
     IS_JETSON,
     LINUX,
     MACOS,
+    PLATFORM_URL,
+    ONLINE,
     PYTHON_VERSION,
     RKNN_CHIPS,
     ROOT,
@@ -40,14 +43,30 @@ from . import (
     WINDOWS,
     ThreadingLocked,
     TryExcept,
+    Retry,
     clean_url,
+    url2file,
     colorstr,
     downloads,
     env_bool,
 )
 from .logger import LOGGER
 
+
 REMOTE_FILE_PREFIXES = ("https://", "http://", "rtsp://", "rtmp://", "tcp://", "ul://", "gs://")
+
+
+def normalize_platform_uri(uri):
+    """Rewrite an Ultralytics Platform web URL to its ul:// URI so it can be loaded directly as data or model.
+
+    Args:
+        uri (str | Path): Resource identifier, e.g. "https://platform.ultralytics.com/user/datasets/slug".
+
+    Returns:
+        (str | Path): "ul://user/datasets/slug" for Platform web URLs, otherwise the input unchanged.
+    """
+    s = str(uri)
+    return f"ul://{s[len(PLATFORM_URL) + 1 :].strip('/')}" if s.startswith(f"{PLATFORM_URL}/") else uri
 
 
 def parse_requirements(file_path=ROOT.parent / "requirements.txt", package=""):
@@ -521,6 +540,212 @@ def check_imshow(warn=False):
         if warn:
             LOGGER.warning(f"Environment does not support cv2.imshow() or PIL Image.show()\n{e}")
         return False
+
+
+def check_file(file, suffix="", download=True, download_dir=".", hard=True):
+    """Search/download file (if necessary), check suffix (if provided), and return path.
+
+    Args:
+        file (str): File name or path, URL, platform URI (ul://), or GCS path (gs://).
+        suffix (str | tuple): Acceptable suffix or tuple of suffixes to validate against the file.
+        download (bool): Whether to download the file if it doesn't exist locally.
+        download_dir (str): Directory to download the file to.
+        hard (bool): Whether to raise an error if the file is not found.
+
+    Returns:
+        (str | list): Path to the file, or an empty list if not found.
+    """
+    file = normalize_platform_uri(file)  # accept Platform web URLs (rewritten to ul://)
+    check_suffix(file, suffix)  # optional
+    file = str(file).strip()  # convert to string and strip spaces
+    file = check_yolov5u_filename(file)  # yolov5n -> yolov5nu
+    if (
+        not file
+        or ("://" not in file and Path(file).exists())  # '://' check required in Windows Python<3.10
+        or file.lower().startswith("grpc://")
+    ):  # file exists or gRPC Triton images
+        return file
+    elif download and file.lower().startswith("ul://"):  # Ultralytics Platform URI
+        from vision_ai_platform.packages.utils import resolve_platform_uri
+
+        url = resolve_platform_uri(file, hard=hard)  # Convert to signed HTTPS URL
+        if url is None:
+            return []  # Not found, soft fail (consistent with file search behavior)
+        # Use URI path for unique directory structure: ul://user/project/model -> user/project/model/filename.pt
+        uri_path = Path(file[5:])  # Remove "ul://"
+        if uri_path.is_absolute() or ".." in uri_path.parts:
+            raise ValueError(f"Unsafe Ultralytics Platform URI path: {file}")
+        local_file = Path(download_dir) / uri_path / url2file(url)
+        # Always re-download NDJSON datasets (cheap, ensures fresh data after updates)
+        if local_file.suffix == ".ndjson":
+            local_file.unlink(missing_ok=True)
+        if local_file.exists():
+            LOGGER.info(f"Found {clean_url(url)} locally at {local_file}")
+        else:
+            local_file.parent.mkdir(parents=True, exist_ok=True)
+            downloads.safe_download(url=url, file=local_file, unzip=False)
+        return str(local_file)
+    elif download and file.lower().startswith(REMOTE_FILE_PREFIXES):  # download
+        if file.startswith("gs://"):
+            file = "https://storage.googleapis.com/" + file[5:]  # convert gs:// to public HTTPS URL
+        url = file  # warning: Pathlib turns :// -> :/
+        file = Path(download_dir) / url2file(file)  # '%2F' to '/', split authentication query strings
+        if file.exists():
+            LOGGER.info(f"Found {clean_url(url)} locally at {file}")  # file already exists
+        else:
+            downloads.safe_download(url=url, file=file, unzip=False)
+        return str(file)
+    else:  # search
+        files = glob.glob(str(ROOT / "**" / file), recursive=True) or glob.glob(str(ROOT.parent / file))  # find file
+        if not files and hard:
+            raise FileNotFoundError(f"'{file}' does not exist")
+        elif len(files) > 1 and hard:
+            raise FileNotFoundError(f"Multiple files match '{file}', specify exact path: {files}")
+        return files[0] if len(files) else []  # return file
+
+
+def check_yaml(file, suffix=(".yaml", ".yml"), hard=True):
+    """Search/download YAML file (if necessary) and return path, checking suffix.
+
+    Args:
+        file (str | Path): File name or path.
+        suffix (tuple): Tuple of acceptable YAML file suffixes.
+        hard (bool): Whether to raise an error if the file is not found or multiple files are found.
+
+    Returns:
+        (str): Path to the YAML file.
+    """
+    return check_file(file, suffix, hard=hard)
+
+
+def check_is_path_safe(basedir: Path | str, path: Path | str) -> bool:
+    """Check if the resolved path is under the intended directory to prevent path traversal.
+
+    Args:
+        basedir (Path | str): The intended directory.
+        path (Path | str): The path to check.
+
+    Returns:
+        (bool): True if the path is safe, False otherwise.
+    """
+    base_dir_resolved = Path(basedir).resolve()
+    path_resolved = Path(path).resolve()
+
+    return path_resolved.exists() and path_resolved.parts[: len(base_dir_resolved.parts)] == base_dir_resolved.parts
+
+
+def check_requirements(requirements=ROOT.parent / "requirements.txt", exclude=(), install=True, cmds="", constrain=()):
+    """Check if installed dependencies meet Ultralytics YOLO models requirements and attempt to auto-update if needed.
+
+    Args:
+        requirements (Path | str | list[str|tuple] | tuple[str]): Path to a requirements.txt file, a single package
+            requirement as a string, a list of package requirements as strings, or a list containing strings and tuples
+            of interchangeable packages.
+        exclude (tuple): Tuple of package names to exclude from checking.
+        install (bool): If True, attempt to auto-update packages that don't meet requirements.
+        cmds (str): Additional commands to pass to the pip install command when auto-updating.
+        constrain (tuple | list): Extra version constraints always appended to the install command even if already
+            satisfied, preventing the resolver from upgrading those packages during install.
+
+    Examples:
+        >>> from ultralytics.utils.checks import check_requirements
+
+        Check a requirements.txt file
+        >>> check_requirements("path/to/requirements.txt")
+
+        Check a single package
+        >>> check_requirements("ultralytics>=8.3.200", cmds="--index-url https://download.pytorch.org/whl/cpu")
+
+        Check multiple packages
+        >>> check_requirements(["numpy", "ultralytics"])
+
+        Check with interchangeable packages
+        >>> check_requirements([("onnxruntime", "onnxruntime-gpu"), "numpy"])
+    """
+    prefix = colorstr("red", "bold", "requirements:")
+
+    if env_bool("ULTRALYTICS_SKIP_REQUIREMENTS_CHECKS"):
+        LOGGER.info(f"{prefix} ULTRALYTICS_SKIP_REQUIREMENTS_CHECKS detected, skipping requirements check.")
+        return True
+
+    if isinstance(requirements, Path):  # requirements.txt file
+        file = requirements.resolve()
+        assert file.exists(), f"{prefix} {file} not found, check failed."
+        requirements = [f"{x.name}{x.specifier}" for x in parse_requirements(file) if x.name not in exclude]
+    elif isinstance(requirements, str):
+        requirements = [requirements]
+
+    pkgs = []
+    for r in requirements:
+        candidates = r if isinstance(r, (list, tuple)) else [r]
+        satisfied = False
+
+        for candidate in candidates:
+            r_stripped = candidate.rpartition("/")[-1].replace(".git", "")  # replace git+https://org/repo.git -> 'repo'
+            match = re.match(r"([a-zA-Z0-9-_]+)([<>!=~]+.*)?", r_stripped)
+            name, required = match[1], match[2].strip() if match[2] else ""
+            try:
+                if check_version(metadata.version(name), required):
+                    satisfied = True
+                    break
+            except (AssertionError, metadata.PackageNotFoundError):
+                continue
+
+        if not satisfied:
+            pkg = candidates[0]
+            if "git+" in pkg:  # strip version constraints from git URLs for pip
+                url, sep, marker = pkg.partition(";")
+                pkg = re.sub(r"[<>!=~]+.*$", "", url) + sep + marker
+            pkgs.append(pkg)
+
+    @Retry(times=2, delay=1)
+    def attempt_install(packages, commands, use_uv):
+        """Attempt package installation with uv if available, falling back to pip."""
+        if use_uv:
+            # Use --python to explicitly target current interpreter (venv or system)
+            # This ensures correct installation when VIRTUAL_ENV env var isn't set
+            return subprocess.check_output(
+                f'uv pip install --no-cache-dir --python "{sys.executable}" {packages} {commands} '
+                f"--index-strategy=unsafe-best-match --break-system-packages",
+                shell=True,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        return subprocess.check_output(
+            f'"{sys.executable}" -m pip install --no-cache-dir {packages} {commands}',
+            shell=True,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+
+    s = " ".join(f'"{x}"' for x in pkgs)  # console string
+    if s and constrain:  # append version constraints to prevent upgrades during install
+        s += " " + " ".join(f'"{c}"' for c in constrain)
+    if s:
+        if install and AUTOINSTALL:  # check environment variable
+            # Note uv fails on arm64 macOS and Raspberry Pi runners
+            n = len(pkgs)  # number of packages updates
+            LOGGER.info(f"{prefix} Ultralytics requirement{'s' * (n > 1)} {pkgs} not found, attempting AutoUpdate...")
+            try:
+                t = time.time()
+                assert ONLINE, "AutoUpdate skipped (offline)"
+                use_uv = not ARM64 and check_uv()  # uv fails on ARM64
+                LOGGER.info(attempt_install(s, cmds, use_uv=use_uv))
+                dt = time.time() - t
+                LOGGER.info(f"{prefix} AutoUpdate success ✅ {dt:.1f}s")
+                LOGGER.warning(
+                    f"{prefix} {colorstr('bold', 'Restart runtime or rerun command for updates to take effect')}\n"
+                )
+            except Exception as e:
+                msg = f"{prefix} ❌ {e}"
+                if hasattr(e, "output") and e.output:
+                    msg += f"\n{e.output}"
+                LOGGER.warning(msg)
+                return False
+        else:
+            return False
+
+    return True
 
 
 def print_args(args: dict | None = None, show_file=True, show_func=False):
