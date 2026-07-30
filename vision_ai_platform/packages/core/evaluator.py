@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Optional, Dict
+import time
 
 import cv2
 import numpy as np
@@ -27,7 +28,28 @@ class BaseEvaluator(ABC):
         """Initialize evaluator with configuration."""
         self.cfg = cfg
         self.model = model
-        self.metrics: Dict[str, float] = {}
+        self.metrics = None
+        self.save_dir = cfg.save_dir
+
+        self.plots = {}
+
+    @abstractmethod
+    def get_dataloader(self, dataset_path, batch_size):
+        """Get data loader from dataset path and batch size."""
+        raise NotImplementedError("get_dataloader function not implemented for this validator")
+
+    @abstractmethod
+    def build_dataset(self, img_path):
+        """Build dataset from image path."""
+        raise NotImplementedError("build_dataset function not implemented in validator")
+
+    def preprocess(self, batch):
+        """Preprocess an input batch."""
+        return batch
+
+    def postprocess(self, preds):
+        """Postprocess the predictions."""
+        return preds
 
     @abstractmethod
     def init_metrics(self) -> None:
@@ -44,24 +66,56 @@ class BaseEvaluator(ABC):
         """Compute final evaluation metrics across all processed batches."""
         raise NotImplementedError
 
-    def evaluate(self, model: nn.Module, dataloader: Any) -> Dict[str, float]:
+    @abstractmethod
+    def evaluate(self, model: nn.Module, dataloader: Any) -> Any:
         """Run complete validation pass over a dataloader.
 
         Args:
             model (nn.Module): Evaluation target model.
             dataloader: Validation dataloader yielding (batch_inputs, targets).
-
-        Returns:
-            Dict[str, float]: Calculated metrics dictionary (e.g., mAP50, mAP50-95).
         """
-        self.model = model
-        self.model.eval()
-        self.init_metrics()
+        raise NotImplementedError
 
-        with torch.no_grad():
-            for inputs, targets in dataloader:
-                preds = self.model(inputs)
-                self.update_metrics(preds, targets)
+    def get_stats(self):
+        """Return statistics about the model's performance."""
+        return {}
 
-        self.metrics = self.compute_metrics()
-        return self.metrics
+    def gather_stats(self):
+        """Gather statistics from all the GPUs during DDP training to GPU 0."""
+        pass
+
+    def print_results(self):
+        """Print the results of the model's predictions."""
+        pass
+
+    def get_desc(self):
+        """Get description of the YOLO model."""
+        pass
+
+    @property
+    def metric_keys(self):
+        """Return the metric keys used in YOLO training/validation."""
+        return []
+
+    def on_plot(self, name, data=None):
+        """Register plots for visualization, deduplicating by type."""
+        plot_type = data.get("type") if data else None
+        if plot_type and any((v.get("data") or {}).get("type") == plot_type for v in self.plots.values()):
+            return  # Skip duplicate plot types
+        self.plots[Path(name)] = {"data": data, "timestamp": time.time()}
+
+    def plot_val_samples(self, batch, ni):
+        """Plot validation samples during training."""
+        pass
+
+    def plot_predictions(self, batch, preds, ni):
+        """Plot YOLO model predictions on batch images."""
+        pass
+
+    def pred_to_json(self, preds, batch):
+        """Convert predictions to JSON format."""
+        pass
+
+    def eval_json(self, stats):
+        """Evaluate and return JSON format of prediction statistics."""
+        pass

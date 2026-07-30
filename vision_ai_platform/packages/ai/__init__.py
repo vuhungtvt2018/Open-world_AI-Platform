@@ -1,1 +1,1 @@
-from .YOLO import YOLOModel, YOLOPredictor, YOLOTracker, YOLOEvaluator, YOLOTrainer
+from .yolo import YOLOModel, YOLOPredictor, YOLOTracker, YOLOEvaluator, YOLOTrainer

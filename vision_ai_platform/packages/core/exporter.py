@@ -16,28 +16,70 @@ import torch.nn as nn
 
 from .config import ExporterConfig
 
-# Helper functions for export handling
-def check_export_format(format_name: str) -> str:
-    """Validate and normalize export format string."""
-    supported_formats = {
-        "torchscript": "TorchScript",
-        "onnx": "ONNX",
-        "openvino": "OpenVINO",
-        "engine": "TensorRT",
-        "coreml": "CoreML",
-        "saved_model": "TensorFlow SavedModel",
-        "pb": "TensorFlow GraphDef",
-        "tflite": "TensorFlow Lite",
-        "edgetpu": "Edge TPU",
-        "paddle": "PaddlePaddle",
-        "ncnn": "NCNN",
-    }
-    fmt = format_name.lower().strip()
-    if fmt not in supported_formats:
-        raise ValueError(
-            f"Unsupported format '{format_name}'. Supported formats: {list(supported_formats.keys())}"
-        )
-    return fmt
+def export_formats():
+    """Return a dictionary of Ultralytics YOLO export formats."""
+    x = [
+        ["PyTorch", "-", ".pt", True, True, [], "base"],
+        [
+            "TorchScript",
+            "torchscript",
+            ".torchscript",
+            True,
+            True,
+            ["batch", "quantize", "nms", "dynamic"],
+            "base",
+        ],
+        [
+            "ONNX",
+            "onnx",
+            ".onnx",
+            True,
+            True,
+            ["batch", "data", "dynamic", "quantize", "opset", "simplify", "nms", "fraction"],
+            "base",
+        ],
+        [
+            "OpenVINO",
+            "openvino",
+            "_openvino_model",
+            True,
+            False,
+            ["batch", "data", "dynamic", "quantize", "nms", "fraction"],
+            "base",
+        ],
+        [
+            "TensorRT",
+            "engine",
+            ".engine",
+            False,
+            True,
+            ["batch", "data", "dynamic", "quantize", "simplify", "nms", "fraction"],
+            "base",
+        ],
+        ["CoreML", "coreml", ".mlpackage", True, False, ["batch", "dynamic", "quantize", "nms"], "coreml"],
+        [
+            "TensorFlow SavedModel",
+            "saved_model",
+            "_saved_model",
+            True,
+            True,
+            ["batch", "data", "fraction", "quantize", "keras", "nms"],
+            "tensorflow",
+        ],
+        ["TensorFlow GraphDef", "pb", ".pb", True, True, ["batch"], "tensorflow"],
+        [
+            "TensorFlow Edge TPU",
+            "edgetpu",
+            "_edgetpu.tflite",
+            True,
+            False,
+            ["data", "fraction", "quantize"],
+            "tensorflow",
+        ],
+        ["PaddlePaddle", "paddle", "_paddle_model", True, True, ["batch"], "base"],
+        ["NCNN", "ncnn", "_ncnn_model", True, True, ["batch", "quantize"], "ncnn"],
+    ]
+    return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU", "Arguments", "Env"], zip(*x)))
 
 
 def prepare_dummy_input(

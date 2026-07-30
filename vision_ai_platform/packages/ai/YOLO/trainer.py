@@ -1,10 +1,20 @@
 from vision_ai_platform.packages.core.model import BaseTrainer
 from vision_ai_platform.packages.core.config import TrainerConfig
 from vision_ai_platform.packages.core.dataset import YOLODataset
-from vision_ai_platform.packages.utils import LOGGER, colorstr, emojis
+from vision_ai_platform.packages.utils import LOGGER, colorstr, emojis, RANK
 from vision_ai_platform.packages.utils.check import clean_url, normalize_platform_uri, check_imgsz
-from vision_ai_platform.packages.utils.device_utils import parse_device, select_device, autocast, unwrap_model, ModelEMA, TORCH_2_4
+from vision_ai_platform.packages.utils.device_utils import (
+    parse_device,
+    select_device,
+    autocast,
+    unwrap_model,
+    ModelEMA,
+    EarlyStopping,
+    TORCH_2_4,
+)
+from vision_ai_platform.packages.utils.check import check_amp
 from vision_ai_platform.packages.ai.optim import MuSGD
+from vision_ai_platform.packages.ai.nn.distill_model import DistillationModel
 
 from typing import Any, Optional, Dict
 from functools import partial
@@ -308,10 +318,10 @@ class YOLOTrainer(BaseTrainer):
 
         # Freeze layers
         freeze_list = (
-            self.args.freeze
-            if isinstance(self.args.freeze, list)
-            else range(self.args.freeze)
-            if isinstance(self.args.freeze, int)
+            self.cfg.freeze
+            if isinstance(self.cfg.freeze, list)
+            else range(self.cfg.freeze)
+            if isinstance(self.cfg.freeze, int)
             else []
         )
         always_freeze_names = [".dfl"]  # always freeze these layers
@@ -371,10 +381,8 @@ class YOLOTrainer(BaseTrainer):
             if self.args.plots:
                 self.plot_training_labels()
 
-        self.stopper, self.stop = EarlyStopping(patience=self.args.patience), False
-        self.resume_training(ckpt)
-        self.scheduler.last_epoch = self.start_epoch - 1  # do not move
-        self.run_callbacks("on_pretrain_routine_end")
+        self.stopper, self.stop = EarlyStopping(patience=self.cfg.patience), False
+        self.scheduler.last_epoch = max(self.epoch - 1, 0)  # do not move
 
     # def check_resume(self, overrides):
     #     """Check if resume checkpoint exists and update arguments accordingly."""

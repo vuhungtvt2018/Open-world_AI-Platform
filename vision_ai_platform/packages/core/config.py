@@ -40,6 +40,19 @@ class ModelConfig(BaseConfig):
         default=640, 
         description="Input image size as integer (640) or list [height, width]"
     )
+    device: str = Field(
+        default="0", 
+        description="CUDA device(s) e.g. '0', '0,1,2,3', 'cpu', or 'mps'"
+    )
+    workers: int = Field(
+        default=8, 
+        ge=0, 
+        description="Number of worker threads for dataloading"
+    )
+    half: bool = Field(
+        default=False, 
+        description="Use FP16 half-precision inference"
+    )
 
 
 class HardwareConfig(BaseConfig):
@@ -138,8 +151,21 @@ class EvaluatorConfig(BaseConfig):
     """Configuration for evaluation / validation metrics."""
     split: str = Field(default="val", description="Dataset split to evaluate on ('val', 'test')")
     save_json: bool = Field(default=False, description="Save results to JSON file for COCO evaluation")
+    save_txt: bool = Field(default=False, description="Save results as .txt files (xywh format)")
+    save_conf: bool = Field(default=False, description="Save confidence scores with results")
     plots: bool = Field(default=True, description="Save plots and charts during evaluation")
+    visualize: bool = Field(default=True, description="Save images during evaluation")
     rect: bool = Field(default=False, description="Use rectangular testing for faster inference")
+    save_dir: str = Field(default="results", description="Directory to save evaluation results")
+    show_labels: bool = Field(default=True, description="Whether to display class labels in the visualization")
+    show_conf: bool = Field(default=True, description="Whether to display confidence values in the visualization")
+    task: str = Field(default="detect", description="Ultralytics task, values: detect, classify, semantic, segment, obb, pose")
+    conf_threshold: float = Field(default=0.25, ge=0.0, le=1.0, alias="conf", description="Object confidence threshold for detection")
+    iou_threshold: float = Field(default=0.7, ge=0.0, le=1.0, alias="iou", description="Intersection Over Union (IoU) threshold for NMS")
+    max_det: int = Field(default=300, ge=1, description="Maximum number of detections per image")
+    classes: Optional[List[int]] = Field(default=None, description="Filter results by class IDs, e.g. [0, 2, 3]")
+    agnostic_nms: bool = Field(default=False, description="Class-agnostic NMS")
+    single_cls: bool = Field(default=False, description="If True, single class training is used.")
 
 
 class TrackerConfig(BaseConfig):

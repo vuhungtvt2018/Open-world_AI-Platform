@@ -10,13 +10,21 @@ class YOLOModel(BaseModel):
         super().__init__(model_cfg, weights_path)
 
     def get_predictor(self, cfg: "PredictorConfig"):
-        return YOLOPredictor(cfg, self.model)
+        if self.predictor is None:
+            return YOLOPredictor(cfg, self.model, self.cfg.imgsz)
+        return self.predictor
 
     def get_evaluator(self, cfg: "EvaluatorConfig"):
-        return YOLOEvaluator(cfg, self.model)
+        if self.evaluator is None:
+            return YOLOEvaluator(cfg, self.model)
+        return self.evaluator
 
     def get_trainer(self, cfg: "TrainerConfig"):
-        return YOLOTrainer(cfg, self.model)
+        if self.trainer is None:
+            return YOLOTrainer(cfg, self.model, self.device)
+        return self.trainer
 
     def get_tracker(self, cfg: "TrackerConfig"):
-        return YOLOTracker(cfg)
+        if self.tracker is None:
+            return YOLOTracker(cfg)
+        return self.tracker

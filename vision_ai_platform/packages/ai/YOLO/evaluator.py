@@ -1,18 +1,432 @@
 from vision_ai_platform.packages.core.model import BaseEvaluator
 from vision_ai_platform.packages.core.config import EvaluatorConfig
-from vision_ai_platform.packages.utils.metrics import Metric, DetMetrics
+from vision_ai_platform.packages.utils import RANK, LOGGER
+from vision_ai_platform.packages.utils.check import check_requirements
+from vision_ai_platform.packages.utils.plotting import Plotter
+from vision_ai_platform.packages.utils.metrics import DetMetrics, ConfusionMatrix
+from vision_ai_platform.packages.utils.nms import non_max_suppression
+import vision_ai_platform.packages.utils.ops as ops
+import vision_ai_platform.packages.utils.converter as converter
 
 from typing import Any, Dict
+from pathlib import Path
+from collections import defaultdict
+import os
+import numpy as np
+import torch
+import torch.distributed as dist
 
 class YOLOEvaluator(BaseEvaluator):
     def __init__(self, cfg: EvaluatorConfig, model = None):
         super().__init__(cfg, model)
+        self.is_coco = False
+        self.is_lvis = False
+        self.class_map = None
+        self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
+        self.niou = self.iouv.numel()
+        self.metrics = DetMetrics()
+        self.plotter = Plotter()
+
+    def preprocess(self, batch: dict[str, Any]) -> dict[str, Any]:
+        """Preprocess batch of images for YOLO validation.
+
+        Args:
+            batch (dict[str, Any]): Batch containing images and annotations.
+
+        Returns:
+            (dict[str, Any]): Preprocessed batch.
+        """
+        for k, v in batch.items():
+            if isinstance(v, torch.Tensor):
+                batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
+        batch["img"] = (batch["img"].half() if self.args.quantize == 16 else batch["img"].float()) / 255
+        return batch
 
     def init_metrics(self) -> None:
         """Initialize metric tracking containers."""
+        val = self.data.get(self.args.split, "")  # validation path
+        self.is_coco = (
+            isinstance(val, str)
+            and "coco" in val
+            and (val.endswith(f"{os.sep}val2017.txt") or val.endswith(f"{os.sep}test-dev2017.txt"))
+        )  # is COCO
+        self.is_lvis = isinstance(val, str) and "lvis" in val and not self.is_coco  # is LVIS
+        self.class_map = converter.coco80_to_coco91_class() if self.is_coco else list(range(1, len(self.model.names) + 1))
+        self.cfg.save_json |= self.cfg.val and (self.is_coco or self.is_lvis) and not self.training  # run final val
+        self.names = self.model.names
+        self.nc = len(self.model.names)
+        self.end2end = getattr(self.model, "end2end", False)
+        self.seen = 0
+        self.jdict = []
+        self.metrics.names = self.model.names
+        self.metrics.clear_stats()
+        self.metrics.clear_image_metrics()
+        self.confusion_matrix = ConfusionMatrix(names=self.model.names, save_matches=self.cfg.plots and self.cfg.visualize)
 
-    def update_metrics(self, preds: Any, targets: Any) -> None:
+    def get_desc(self):
+        """Return a formatted string summarizing class metrics of YOLO model."""
+        return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)")
+
+    def postprocess(self, preds: torch.Tensor) -> list[dict[str, torch.Tensor]]:
+        """Apply Non-maximum suppression to prediction outputs.
+
+        Args:
+            preds (torch.Tensor): Raw predictions from the model.
+
+        Returns:
+            (list[dict[str, torch.Tensor]]): Processed predictions after NMS, where each dict contains 'bboxes', 'conf',
+                'cls', and 'extra' tensors.
+        """
+        outputs = non_max_suppression(
+            preds,
+            self.cfg.conf_threshold,
+            self.cfg.iou_threshold,
+            nc=0 if self.cfg.task == "detect" else self.nc,
+            multi_label=True,
+            agnostic=self.cfg.single_cls or self.cfg.agnostic_nms,
+            max_det=self.cfg.max_det,
+            end2end=self.end2end,
+            rotated=self.cfg.task == "obb",
+        )
+        return [{"bboxes": x[:, :4], "conf": x[:, 4], "cls": x[:, 5], "extra": x[:, 6:]} for x in outputs]
+
+    def _prepare_batch(self, si: int, batch: dict[str, Any]) -> dict[str, Any]:
+        """Prepare a batch of images and annotations for validation.
+
+        Args:
+            si (int): Sample index within the batch.
+            batch (dict[str, Any]): Batch data containing images and annotations.
+
+        Returns:
+            (dict[str, Any]): Prepared batch with processed annotations.
+        """
+        idx = batch["batch_idx"] == si
+        cls = batch["cls"][idx].squeeze(-1)
+        bbox = batch["bboxes"][idx]
+        ori_shape = batch["ori_shape"][si]
+        imgsz = batch["img"].shape[2:]
+        ratio_pad = batch["ratio_pad"][si]
+        if cls.shape[0]:
+            bbox = ops.xywh2xyxy(bbox) * torch.tensor(imgsz, device=self.device)[[1, 0, 1, 0]]  # target boxes
+        return {
+            "cls": cls,
+            "bboxes": bbox,
+            "ori_shape": ori_shape,
+            "imgsz": imgsz,
+            "ratio_pad": ratio_pad,
+            "im_file": batch["im_file"][si],
+        }
+
+    def _prepare_pred(self, pred: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Prepare predictions for evaluation against ground truth.
+
+        Args:
+            pred (dict[str, torch.Tensor]): Post-processed predictions from the model.
+
+        Returns:
+            (dict[str, torch.Tensor]): Prepared predictions in native space.
+        """
+        if self.cfg.single_cls:
+            pred["cls"] *= 0
+        return pred
+
+    def update_metrics(self, preds: list[dict[str, torch.Tensor]], targets: dict[str, Any]) -> None:
         """Update metrics state with a batch of predictions and ground truth targets."""
+        for si, pred in enumerate(preds):
+            self.seen += 1
+            pbatch = self._prepare_batch(si, targets)
+            predn = self._prepare_pred(pred)
+
+            cls = pbatch["cls"].cpu().numpy()
+            no_pred = predn["cls"].shape[0] == 0
+            self.metrics.update_stats(
+                {
+                    **self._process_batch(predn, pbatch),
+                    "target_cls": cls,
+                    "target_img": np.unique(cls),
+                    "conf": np.zeros(0) if no_pred else predn["conf"].cpu().numpy(),
+                    "pred_cls": np.zeros(0) if no_pred else predn["cls"].cpu().numpy(),
+                    "im_name": Path(pbatch["im_file"]).name,
+                }
+            )
+            # Evaluate
+            if self.cfg.plots:
+                self.confusion_matrix.process_batch(predn, pbatch, conf=self.args.conf)
+                if self.cfg.visualize:
+                    if self.confusion_matrix.matches:
+                        from vision_ai_platform.packages.utils.ops import xyxy2xywh
+                        labels = defaultdict(list)
+                        for i, mtype in enumerate(["GT", "FP", "TP", "FN"]):
+                            mbatch = self.confusion_matrix.matches[mtype]
+                            if "conf" not in mbatch:
+                                mbatch["conf"] = torch.tensor([1.0] * len(mbatch["bboxes"]), device=targets["img"][si].device)
+                            mbatch["batch_idx"] = torch.ones(len(mbatch["bboxes"]), device=targets["img"][si].device) * i
+                            for k in mbatch:
+                                labels[k] += mbatch[k]
+                        labels = {k: torch.stack(v, 0) if len(v) else torch.empty(0) for k, v in labels.items()}
+                        if self.task != "obb" and labels["bboxes"].shape[0]:
+                            labels["bboxes"] = xyxy2xywh(labels["bboxes"])
+                        (self.save_dir / "visualizations").mkdir(parents=True, exist_ok=True)
+                        self.plotter.plot_images(
+                            labels,
+                            targets["img"][si].repeat(4, 1, 1, 1),
+                            paths=["Ground Truth", "False Positives", "True Positives", "False Negatives"],
+                            fname=self.save_dir / "visualizations" / Path(pbatch["im_file"]).name,
+                            names=self.names,
+                            max_subplots=4,
+                            conf_thres=0.001,
+                            show_labels=self.cfg.show_labels,
+                            show_conf=self.cfg.show_conf,
+                        )
+
+            if no_pred:
+                continue
+
+            # Save
+            if self.cfg.save_json or self.cfg.save_txt:
+                predn_scaled = self.scale_preds(predn, pbatch)
+            if self.cfg.save_json:
+                self.pred_to_json(predn_scaled, pbatch)
+            if self.cfg.save_txt:
+                self.save_one_txt(
+                    predn_scaled,
+                    self.cfg.save_conf,
+                    pbatch["ori_shape"],
+                    self.save_dir / "labels" / f"{Path(pbatch['im_file']).stem}.txt",
+                )
+
+    def finalize_metrics(self) -> None:
+        """Set final values for metrics speed and confusion matrix."""
+        if self.args.plots:
+            for normalize in True, False:
+                self.confusion_matrix.plot(save_dir=self.save_dir, normalize=normalize, on_plot=self.on_plot)
+        self.metrics.speed = self.speed
+        self.metrics.confusion_matrix = self.confusion_matrix
+        self.metrics.save_dir = self.save_dir
+
+    def _gather_image_metrics(self, metric) -> None:
+        """Gather per-image metrics from all GPUs for a single metric object."""
+        if RANK == 0:
+            gathered_image_metrics = [None] * dist.get_world_size()
+            dist.gather_object(metric.image_metrics, gathered_image_metrics, dst=0)
+            metric.clear_image_metrics()
+            for image_metrics in gathered_image_metrics:
+                if image_metrics:
+                    metric.image_metrics.update(image_metrics)
+        elif RANK > 0:
+            dist.gather_object(metric.image_metrics, None, dst=0)
+            metric.clear_image_metrics()
+
+    def gather_stats(self) -> None:
+        """Gather stats from all GPUs."""
+        if RANK == 0:
+            gathered_stats = [None] * dist.get_world_size()
+            dist.gather_object(self.metrics.stats, gathered_stats, dst=0)
+            merged_stats = {key: [] for key in self.metrics.stats.keys()}
+            for stats_dict in gathered_stats:
+                for key in merged_stats:
+                    merged_stats[key].extend(stats_dict[key])
+            gathered_jdict = [None] * dist.get_world_size()
+            dist.gather_object(self.jdict, gathered_jdict, dst=0)
+            self.jdict = []
+            for jdict in gathered_jdict:
+                self.jdict.extend(jdict)
+            self.metrics.stats = merged_stats
+            self._gather_image_metrics(self.metrics.box)
+            self.seen = len(self.dataloader.dataset)  # total image count from dataset
+        elif RANK > 0:
+            dist.gather_object(self.metrics.stats, None, dst=0)
+            dist.gather_object(self.jdict, None, dst=0)
+            self._gather_image_metrics(self.metrics.box)
+            self.jdict = []
+            self.metrics.clear_stats()
+        if self.args.plots and RANK > -1:
+            matrix = torch.as_tensor(self.confusion_matrix.matrix, device=self.device)
+            dist.reduce(matrix, dst=0, op=dist.ReduceOp.SUM)
+            if RANK == 0:
+                self.confusion_matrix.matrix = matrix.cpu().numpy()
 
     def compute_metrics(self) -> Dict[str, float]:
         """Compute final evaluation metrics across all processed batches."""
+
+    def save_one_txt(self, predn: dict[str, torch.Tensor], save_conf: bool, shape: tuple[int, int], file: Path) -> None:
+        """Save YOLO detections to a txt file in normalized coordinates in a specific format.
+
+        Args:
+            predn (dict[str, torch.Tensor]): Dictionary containing predictions with keys 'bboxes', 'conf', and 'cls'.
+            save_conf (bool): Whether to save confidence scores.
+            shape (tuple[int, int]): Shape of the original image (height, width).
+            file (Path): File path to save the detections.
+        """
+        from vision_ai_platform.packages.core.results import Results
+
+        results = Results(
+            np.zeros((shape[0], shape[1]), dtype=np.uint8),
+            path=None,
+            names=self.names,
+            boxes=torch.cat([predn["bboxes"], predn["conf"].unsqueeze(-1), predn["cls"].unsqueeze(-1)], dim=1),
+        )
+
+        if results.semantic_mask is not None:
+            LOGGER.warning("Semantic Segmentation task does not support `save_txt`.")
+            return str(file)
+        
+        is_obb = results.obb is not None
+        boxes = results.obb if is_obb else results.boxes
+        masks = results.masks
+        probs = results.probs
+        kpts = results.keypoints
+        texts = []
+        if probs is not None:
+            # Classify
+            [texts.append(f"{probs.data[j]:.2f} {self.names[j]}") for j in probs.top5]
+        elif boxes:
+            # Detect/segment/pose
+            for j, d in enumerate(boxes):
+                c, conf, id = int(d.cls), float(d.conf), int(d.id.item()) if d.is_track else None
+                line = (c, *(d.xyxyxyxyn.view(-1) if is_obb else d.xywhn.view(-1)))
+                if masks:
+                    seg = masks[j].xyn[0].copy().reshape(-1)  # reversed mask.xyn, (n,2) to (n*2)
+                    line = (c, *seg)
+                if kpts is not None:
+                    kpt = torch.cat((kpts[j].xyn, kpts[j].conf[..., None]), 2) if kpts[j].has_visible else kpts[j].xyn
+                    line += (*kpt.reshape(-1).tolist(),)
+                line += (conf,) * save_conf + (() if id is None else (id,))
+                texts.append(("%g " * len(line)).rstrip() % line)
+
+        if texts:
+            Path(file).parent.mkdir(parents=True, exist_ok=True)  # make directory
+            with open(file, "a", encoding="utf-8") as f:
+                f.writelines(text + "\n" for text in texts)
+
+        return str(file)
+
+    def pred_to_json(self, predn: dict[str, torch.Tensor], pbatch: dict[str, Any]) -> None:
+        """Serialize YOLO predictions to COCO json format.
+
+        Args:
+            predn (dict[str, torch.Tensor]): Predictions dictionary containing 'bboxes', 'conf', and 'cls' keys with
+                bounding box coordinates, confidence scores, and class predictions.
+            pbatch (dict[str, Any]): Batch dictionary containing 'imgsz', 'ori_shape', 'ratio_pad', and 'im_file'.
+
+        Examples:
+             >>> result = {
+             ...     "image_id": 42,
+             ...     "file_name": "42.jpg",
+             ...     "category_id": 18,
+             ...     "bbox": [258.15, 41.29, 348.26, 243.78],
+             ...     "score": 0.236,
+             ... }
+        """
+        path = Path(pbatch["im_file"])
+        stem = path.stem
+        image_id = int(stem) if stem.isnumeric() else stem
+        box = ops.xyxy2xywh(predn["bboxes"])  # xywh
+        box[:, :2] -= box[:, 2:] / 2  # xy center to top-left corner
+        for b, s, c in zip(box.tolist(), predn["conf"].tolist(), predn["cls"].tolist()):
+            self.jdict.append(
+                {
+                    "image_id": image_id,
+                    "file_name": path.name,
+                    "category_id": self.class_map[int(c)],
+                    "bbox": [round(x, 3) for x in b],
+                    "score": round(s, 5),
+                }
+            )
+
+    def scale_preds(self, predn: dict[str, torch.Tensor], pbatch: dict[str, Any]) -> dict[str, torch.Tensor]:
+        """Scales predictions to the original image size."""
+        return {
+            **predn,
+            "bboxes": ops.scale_boxes(
+                pbatch["imgsz"],
+                predn["bboxes"].clone(),
+                pbatch["ori_shape"],
+                ratio_pad=pbatch["ratio_pad"],
+            ),
+        }
+
+    def eval_json(self, stats: dict[str, Any]) -> dict[str, Any]:
+        """Evaluate YOLO output in JSON format and return performance statistics.
+
+        Args:
+            stats (dict[str, Any]): Current statistics dictionary.
+
+        Returns:
+            (dict[str, Any]): Updated statistics dictionary with COCO/LVIS evaluation results.
+        """
+        pred_json = self.save_dir / "predictions.json"  # predictions
+        anno_json = (
+            self.data["path"]
+            / "annotations"
+            / ("instances_val2017.json" if self.is_coco else f"lvis_v1_{self.cfg.split}.json")
+        )  # annotations
+        return self.coco_evaluate(stats, pred_json, anno_json)
+
+    def coco_evaluate(
+        self,
+        stats: dict[str, Any],
+        pred_json: str,
+        anno_json: str,
+        iou_types: str | list[str] = "bbox",
+        suffix: str | list[str] = "Box",
+    ) -> dict[str, Any]:
+        """Evaluate COCO/LVIS metrics using faster-coco-eval library.
+
+        Performs evaluation using the faster-coco-eval library to compute mAP metrics for object detection. Updates the
+        provided stats dictionary with computed metrics including mAP50, mAP50-95, and LVIS-specific metrics if
+        applicable.
+
+        Args:
+            stats (dict[str, Any]): Dictionary to store computed metrics and statistics.
+            pred_json (str | Path): Path to JSON file containing predictions in COCO format.
+            anno_json (str | Path): Path to JSON file containing ground truth annotations in COCO format.
+            iou_types (str | list[str]): IoU type(s) for evaluation. Can be single string or list of strings. Common
+                values include "bbox", "segm", "keypoints". Defaults to "bbox".
+            suffix (str | list[str]): Suffix to append to metric names in stats dictionary. Should correspond to
+                iou_types if multiple types provided. Defaults to "Box".
+
+        Returns:
+            (dict[str, Any]): Updated stats dictionary containing the computed COCO/LVIS evaluation metrics.
+        """
+        if self.args.save_json and (self.is_coco or self.is_lvis) and len(self.jdict):
+            LOGGER.info(f"\nEvaluating faster-coco-eval mAP using {pred_json} and {anno_json}...")
+            try:
+                for x in pred_json, anno_json:
+                    assert x.is_file(), f"{x} file not found"
+                iou_types = [iou_types] if isinstance(iou_types, str) else iou_types
+                suffix = [suffix] if isinstance(suffix, str) else suffix
+                check_requirements("faster-coco-eval>=1.6.7")
+                from faster_coco_eval import COCO, COCOeval_faster
+
+                anno = COCO(anno_json)
+                pred = anno.loadRes(pred_json)
+                for i, iou_type in enumerate(iou_types):
+                    val = COCOeval_faster(
+                        anno, pred, iouType=iou_type, lvis_style=self.is_lvis, print_function=LOGGER.info
+                    )
+                    val.params.imgIds = [int(Path(x).stem) for x in self.dataloader.dataset.im_files]  # images to eval
+                    val.evaluate()
+                    val.accumulate()
+                    val.summarize()
+
+                    # update mAP50-95 and mAP50
+                    stats[f"metrics/mAP50({suffix[i][0]})"] = val.stats_as_dict["AP_50"]
+                    stats[f"metrics/mAP50-95({suffix[i][0]})"] = val.stats_as_dict["AP_all"]
+                    # record mAP for small, medium, large objects as well
+                    stats["metrics/mAP_small(B)"] = val.stats_as_dict["AP_small"]
+                    stats["metrics/mAP_medium(B)"] = val.stats_as_dict["AP_medium"]
+                    stats["metrics/mAP_large(B)"] = val.stats_as_dict["AP_large"]
+                    # update fitness
+                    stats["fitness"] = 0.9 * val.stats_as_dict["AP_all"] + 0.1 * val.stats_as_dict["AP_50"]
+
+                    if self.is_lvis:
+                        stats[f"metrics/APr({suffix[i][0]})"] = val.stats_as_dict["APr"]
+                        stats[f"metrics/APc({suffix[i][0]})"] = val.stats_as_dict["APc"]
+                        stats[f"metrics/APf({suffix[i][0]})"] = val.stats_as_dict["APf"]
+
+                if self.is_lvis:
+                    stats["fitness"] = stats["metrics/mAP50-95(B)"]  # always use box mAP50-95 for fitness
+            except Exception as e:
+                LOGGER.warning(f"faster-coco-eval unable to run: {e}")
+        return stats

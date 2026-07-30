@@ -54,12 +54,12 @@ class BaseTrainer(ABC):
         # Dirs
         self.save_dir = Path(cfg.save_dir).resolve()
         self.weight_dir = self.save_dir / "weights"
-        self.last, self.best = self.wdir / "last.pt", self.wdir / "best.pt"
+        self.last, self.best = self.weight_dir / "last.pt", self.weight_dir / "best.pt"
 
         self.batch_size = self.cfg.batch_size
         self.epochs = self.cfg.epochs or 100
         self.epoch: int = 0
-        self.save_period = self.cfgs.save_period
+        self.save_period = getattr(self.cfg, "save_period", 10)
 
         # Model and dataset
         self.model = model

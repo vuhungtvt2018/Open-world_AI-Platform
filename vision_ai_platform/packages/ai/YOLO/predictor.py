@@ -1,6 +1,7 @@
 from vision_ai_platform.packages.core.model import BasePredictor
 from vision_ai_platform.packages.core.config import PredictorConfig
 from vision_ai_platform.packages.core.results import Results
+import vision_ai_platform.packages.utils.ops as ops
 
 from typing import Any, List, Optional, Union
 import torch
@@ -248,8 +249,7 @@ class YOLOPredictor(BasePredictor):
             orig_imgs: Original raw input passed into `predict`.
 
         Returns:
-            List[Results]: List of detections per image. Each item is a numpy array of 
-                           shape (N, 6) with columns: [x1, y1, x2, y2, confidence, class_id].
+            List[Results]: List of Results objects per image.
         """
         if preds is None:
             return []
@@ -268,53 +268,52 @@ class YOLOPredictor(BasePredictor):
             max_det=self.cfg.max_det,
         )
 
-        formatted_results = []
-        orig_shape = self._meta.get("orig_shape")
-        padded_shape = self._meta.get("padded_shape", self.imgsz)
-        ratio_pad = self._meta.get("ratio_pad")
+        # 2. Convert batch of images to numpy format if needed
+        if not isinstance(orig_imgs, list):
+            orig_imgs = ops.convert_torch2numpy_batch(orig_imgs)[..., ::-1]
 
-        for det in det_results:
-            if len(det):
-                # 2. Rescale bboxes from letterboxed canvas back to original image shape
-                det[:, :4] = scale_boxes(
-                    img1_shape=padded_shape,
-                    boxes=det[:, :4],
-                    img0_shape=orig_shape,
-                    ratio_pad=ratio_pad,
-                )
-                formatted_results.append(det.cpu().numpy())
-            else:
-                formatted_results.append(np.empty((0, 6), dtype=np.float32))
+        # 3. Construct list of Results objects
+        return self.construct_results(det_results, orig_imgs)
 
-        return formatted_results
-
-    def construct_results(self, preds, img, orig_imgs):
+    def construct_results(self, preds: List[torch.Tensor], orig_imgs: List[np.ndarray]) -> List[Results]:
         """Construct a list of Results objects from model predictions.
 
         Args:
             preds (list[torch.Tensor]): List of predicted bounding boxes and scores for each image.
-            img (torch.Tensor): Batch of preprocessed images used for inference.
             orig_imgs (list[np.ndarray]): List of original images before preprocessing.
 
         Returns:
-            (list[Results]): List of Results objects containing detection information for each image.
+            (list[Results]): List of Results objects containing detection information.
         """
+        img_paths = getattr(self, "batch", [None] * len(preds))[0] if hasattr(self, "batch") else [None] * len(preds)
         return [
-            self.construct_result(pred, img, orig_img, img_path)
-            for pred, orig_img, img_path in zip(preds, orig_imgs, self.batch[0])
+            self.construct_result(pred, orig_img, img_path)
+            for pred, orig_img, img_path in zip(preds, orig_imgs, img_paths)
         ]
 
-    def construct_result(self, pred, img, orig_img, img_path):
+    def construct_result(self, pred: torch.Tensor, orig_img: np.ndarray, img_path: str | None) -> Results:
         """Construct a single Results object from one image prediction.
 
         Args:
-            pred (torch.Tensor): Predicted boxes and scores with shape (N, 6) where N is the number of detections.
-            img (torch.Tensor): Preprocessed image tensor used for inference.
+            pred (torch.Tensor): Predicted boxes and scores with shape (N, 6).
             orig_img (np.ndarray): Original image before preprocessing.
-            img_path (str): Path to the original image file.
+            img_path (str | None): Path to the original image file.
 
         Returns:
-            (Results): Results object containing the original image, image path, class names, and scaled bounding boxes.
+            (Results): Results object containing the original image, path, class names, and scaled bounding boxes.
         """
-        pred[:, :4] = scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-        return Results(orig_img, path=img_path, names=self.model.names, boxes=pred[:, :6])
+        if len(pred):
+            orig_shape = self._meta.get("orig_shape", orig_img.shape[:2])
+            padded_shape = self._meta.get("padded_shape", self.imgsz)
+            ratio_pad = self._meta.get("ratio_pad")
+
+            # Rescale bounding boxes from padded letterbox image back to original dimensions
+            pred[:, :4] = scale_boxes(
+                img1_shape=padded_shape,
+                boxes=pred[:, :4],
+                img0_shape=orig_shape,
+                ratio_pad=ratio_pad,
+            )
+
+        names = getattr(self.model, "names", getattr(self, "names", {}))
+        return Results(orig_img, path=img_path or "", names=names, boxes=pred)

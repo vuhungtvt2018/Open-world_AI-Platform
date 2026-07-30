@@ -42,6 +42,7 @@ class BaseModel(ABC):
         self.cfg = model_cfg
         self.weights_path = weights_path
         self.model: Optional[nn.Module] = None
+        self.device = model_cfg.device
         
         # Internal modules
         self.predictor: Optional[BasePredictor] = None
@@ -83,7 +84,6 @@ class BaseModel(ABC):
         """Perform predictions on given image/video sources."""
         if self.predictor is None:
             # Fallback initialization using given or default PredictorConfig
-            from __main__ import PredictorConfig  # Example reference
             cfg = predict_cfg or PredictorConfig(**kwargs)
             self.predictor = self.get_predictor(cfg)
 
@@ -100,7 +100,6 @@ class BaseModel(ABC):
     ) -> List[Any]:
         """Perform object tracking on video sequence or stream."""
         if self.tracker is None:
-            from __main__ import TrackerConfig
             cfg = tracker_cfg or TrackerConfig(**kwargs)
             self.tracker = self.get_tracker(cfg)
 
@@ -121,7 +120,6 @@ class BaseModel(ABC):
     ) -> Dict[str, float]:
         """Validate/evaluate the model on a target dataset split."""
         if self.evaluator is None:
-            from __main__ import EvaluatorConfig
             cfg = eval_cfg or EvaluatorConfig(**kwargs)
             self.evaluator = self.get_evaluator(cfg)
 

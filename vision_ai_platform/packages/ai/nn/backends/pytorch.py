@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from torch import nn
+import torch.nn as nn
 
 from vision_ai_platform.packages.utils import IS_JETSON, LOGGER, is_jetson
 
@@ -47,7 +47,7 @@ class PyTorchBackend(BaseBackend):
         Args:
             weight (str | torch.nn.Module): Path to the .pt checkpoint or a pre-loaded module.
         """
-        from ultralytics.nn.tasks import BaseModel, load_checkpoint
+        from vision_ai_platform.packages.ai.nn.tasks import BaseModel, load_checkpoint
 
         if isinstance(weight, torch.nn.Module):
             if self.fuse and hasattr(weight, "fuse"):

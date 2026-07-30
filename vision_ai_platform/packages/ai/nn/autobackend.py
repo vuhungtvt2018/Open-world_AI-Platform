@@ -14,26 +14,15 @@ from vision_ai_platform.packages.utils.check import check_suffix
 from vision_ai_platform.packages.utils.downloads import is_url
 
 from .backends import (
-    AscendBackend,
-    AxeleraBackend,
-    CoreMLBackend,
-    DeepXBackend,
-    ExecuTorchBackend,
-    HailoBackend,
     LiteRTBackend,
-    MNNBackend,
     NCNNBackend,
     ONNXBackend,
-    ONNXIMXBackend,
     OpenVINOBackend,
     PaddleBackend,
     PyTorchBackend,
-    QNNBackend,
-    RKNNBackend,
     TensorFlowBackend,
     TensorRTBackend,
     TorchScriptBackend,
-    TritonBackend,
 )
 
 
@@ -153,23 +142,12 @@ class AutoBackend(nn.Module):
         "dnn": ONNXBackend,  # Special case: ONNX with DNN
         "openvino": OpenVINOBackend,
         "engine": TensorRTBackend,
-        "coreml": CoreMLBackend,
         "saved_model": TensorFlowBackend,
         "pb": TensorFlowBackend,
         "edgetpu": TensorFlowBackend,
         "paddle": PaddleBackend,
-        "mnn": MNNBackend,
         "ncnn": NCNNBackend,
-        "imx": ONNXIMXBackend,
-        "rknn": RKNNBackend,
-        "triton": TritonBackend,
-        "executorch": ExecuTorchBackend,
-        "axelera": AxeleraBackend,
-        "deepx": DeepXBackend,
-        "qnn": QNNBackend,
         "litert": LiteRTBackend,
-        "hailo": HailoBackend,
-        "ascend": AscendBackend,
     }
 
     @torch.no_grad()
@@ -215,7 +193,7 @@ class AutoBackend(nn.Module):
         backend_kwargs = {"device": device, "fp16": fp16}
 
         if format not in self._BACKEND_MAP:
-            from ultralytics.engine.exporter import export_formats
+            from vision_ai_platform.packages.core.exporter import export_formats
 
             raise TypeError(
                 f"model='{model}' is not a supported model format. "
@@ -343,7 +321,7 @@ class AutoBackend(nn.Module):
             >>> fmt = AutoBackend._model_type("path/to/model.onnx")
             >>> assert fmt == "onnx"
         """
-        from ultralytics.engine.exporter import export_formats
+        from vision_ai_platform.packages.core.exporter import export_formats
 
         sf = export_formats()["Suffix"]
         if not is_url(p) and not isinstance(p, str):
