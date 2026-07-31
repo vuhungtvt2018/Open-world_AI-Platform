@@ -48,14 +48,12 @@ class TensorFlowBackend(BaseBackend):
             # Load metadata
             metadata_file = Path(weight) / "metadata.yaml"
             if metadata_file.exists():
-                import yaml
-                
-                with open(metadata_file, "r", encoding="utf-8") as f:
-                    metadata = yaml.safe_load(f)
-                self.apply_metadata(metadata)
+                from vision_ai_platform.packages.utils import YAML
+
+            self.apply_metadata(YAML.load(metadata_file))
         elif self.format == "pb":
             LOGGER.info(f"Loading {weight} for TensorFlow GraphDef inference...")
-            from ultralytics.utils.export.tensorflow import gd_outputs
+            from vision_ai_platform.packages.utils.export.tensorflow import gd_outputs
 
             def wrap_frozen_graph(gd, inputs, outputs):
                 """Wrap a TensorFlow frozen graph for inference by pruning to specified input/output nodes."""
@@ -73,11 +71,9 @@ class TensorFlowBackend(BaseBackend):
                 metadata_file = next(
                     Path(weight).resolve().parent.rglob(f"{Path(weight).stem}_saved_model*/metadata.yaml")
                 )
-                import yaml
-                
-                with open(metadata_file, "r", encoding="utf-8") as f:
-                    metadata = yaml.safe_load(f)
-                self.apply_metadata(metadata)
+                from vision_ai_platform.packages.utils import YAML
+
+                self.apply_metadata(YAML.load(metadata_file))
             except StopIteration:
                 pass
         else:  # edgetpu

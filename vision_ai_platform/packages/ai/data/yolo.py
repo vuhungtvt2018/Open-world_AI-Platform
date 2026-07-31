@@ -17,7 +17,7 @@ from PIL import Image
 from torch.utils.data import Dataset, ConcatDataset
 
 from vision_ai_platform.packages.utils import LOCAL_RANK, LOGGER, NUM_THREADS, colorstr
-from vision_ai_platform.packages.core.config import ModelConfig
+from vision_ai_platform.packages.core.config import YOLOConfig
 from vision_ai_platform.packages.utils.instance import Instances
 from vision_ai_platform.packages.utils.ops import resample_segments, segments2boxes
 from vision_ai_platform.packages.utils.device_utils import TORCHVISION_0_18
@@ -1300,7 +1300,7 @@ class ClassificationDataset:
 
 
 def build_yolo_dataset(
-    cfg: IterableSimpleNamespace,
+    cfg: YOLOConfig,
     img_path: str,
     batch: int,
     data: dict[str, Any],
@@ -1349,7 +1349,7 @@ def build_yolo_dataset(
 
 
 def build_grounding(
-    cfg: ModelConfig,
+    cfg: YOLOConfig,
     img_path: str,
     json_file: str,
     batch: int,

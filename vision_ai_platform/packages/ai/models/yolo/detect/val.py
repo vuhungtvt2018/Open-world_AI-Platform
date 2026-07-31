@@ -1,37 +1,65 @@
-from vision_ai_platform.packages.core.model import BaseEvaluator
-from vision_ai_platform.packages.core.config import EvaluatorConfig
-from vision_ai_platform.packages.utils import RANK, LOGGER
-from vision_ai_platform.packages.utils.check import check_requirements, check_imgsz
-from vision_ai_platform.packages.utils.plotting import Plotter
-from vision_ai_platform.packages.utils.metrics import DetMetrics, ConfusionMatrix
-from vision_ai_platform.packages.utils.nms import non_max_suppression
-import vision_ai_platform.packages.utils.ops as ops
-import vision_ai_platform.packages.utils.converter as converter
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-from typing import Any, Dict
-from pathlib import Path
-from collections import defaultdict
+from __future__ import annotations
+
 import os
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.distributed as dist
 
-class YOLOEvaluator(BaseEvaluator):
-    def __init__(
-        self,
-        cfg: EvaluatorConfig,
-        model: nn.Module | None = None,
-        device: str = ""
-    ):
-        super().__init__(cfg, model, device)
+from vision_ai_platform.packages.ai.data import build_dataloader, build_yolo_dataset
+from vision_ai_platform.packages.utils import converter
+from vision_ai_platform.packages.core.validator import BaseValidator
+from vision_ai_platform.packages.utils import LOGGER, RANK, nms, ops
+from vision_ai_platform.packages.utils.check import check_requirements
+from vision_ai_platform.packages.utils.metrics import ConfusionMatrix, DetMetrics
+from vision_ai_platform.packages.utils.loss import box_iou
+from vision_ai_platform.packages.utils.plotting import plot_images
+from vision_ai_platform.packages.utils.save_results import save_txt
+
+class DetectionValidator(BaseValidator):
+    """A class extending the BaseValidator class for validation based on a detection model.
+
+    This class implements validation functionality specific to object detection tasks, including metrics calculation,
+    prediction processing, and visualization of results.
+
+    Attributes:
+        is_coco (bool): Whether the dataset is COCO.
+        is_lvis (bool): Whether the dataset is LVIS.
+        class_map (list[int]): Mapping from model class indices to dataset class indices.
+        metrics (DetMetrics): Object detection metrics calculator.
+        iouv (torch.Tensor): IoU thresholds for mAP calculation.
+        niou (int): Number of IoU thresholds.
+        jdict (list[dict[str, Any]]): List for storing JSON detection results.
+        stats (dict[str, list[torch.Tensor]]): Dictionary for storing statistics during validation.
+
+    Examples:
+        >>> from ultralytics.models.yolo.detect import DetectionValidator
+        >>> args = dict(model="yolo26n.pt", data="coco8.yaml")
+        >>> validator = DetectionValidator(args=args)
+        >>> validator()
+    """
+
+    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks: dict | None = None) -> None:
+        """Initialize detection validator with necessary variables and settings.
+
+        Args:
+            dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
+            save_dir (Path, optional): Directory to save results.
+            args (dict[str, Any], optional): Arguments for the validator.
+            _callbacks (dict, optional): Dictionary of callback functions.
+        """
+        super().__init__(dataloader, save_dir, args, _callbacks)
         self.is_coco = False
         self.is_lvis = False
         self.class_map = None
+        self.cfg.task = "detect"
         self.iouv = torch.linspace(0.5, 0.95, 10)  # IoU vector for mAP@0.5:0.95
         self.niou = self.iouv.numel()
         self.metrics = DetMetrics()
-        self.plotter = Plotter()
 
     def preprocess(self, batch: dict[str, Any]) -> dict[str, Any]:
         """Preprocess batch of images for YOLO validation.
@@ -48,28 +76,32 @@ class YOLOEvaluator(BaseEvaluator):
         batch["img"] = (batch["img"].half() if self.cfg.quantize == 16 else batch["img"].float()) / 255
         return batch
 
-    def init_metrics(self) -> None:
-        """Initialize metric tracking containers."""
-        val = self.data.get(self.args.split, "")  # validation path
+    def init_metrics(self, model: torch.nn.Module) -> None:
+        """Initialize evaluation metrics for YOLO detection validation.
+
+        Args:
+            model (torch.nn.Module): Model to validate.
+        """
+        val = self.data.get(self.cfg.split, "")  # validation path
         self.is_coco = (
             isinstance(val, str)
             and "coco" in val
             and (val.endswith(f"{os.sep}val2017.txt") or val.endswith(f"{os.sep}test-dev2017.txt"))
         )  # is COCO
         self.is_lvis = isinstance(val, str) and "lvis" in val and not self.is_coco  # is LVIS
-        self.class_map = converter.coco80_to_coco91_class() if self.is_coco else list(range(1, len(self.model.names) + 1))
+        self.class_map = converter.coco80_to_coco91_class() if self.is_coco else list(range(1, len(model.names) + 1))
         self.cfg.save_json |= self.cfg.val and (self.is_coco or self.is_lvis) and not self.training  # run final val
-        self.names = self.model.names
-        self.nc = len(self.model.names)
-        self.end2end = getattr(self.model, "end2end", False)
+        self.names = model.names
+        self.nc = len(model.names)
+        self.end2end = getattr(model, "end2end", False)
         self.seen = 0
         self.jdict = []
-        self.metrics.names = self.model.names
+        self.metrics.names = model.names
         self.metrics.clear_stats()
         self.metrics.clear_image_metrics()
-        self.confusion_matrix = ConfusionMatrix(names=self.model.names, save_matches=self.cfg.plots and self.cfg.visualize)
+        self.confusion_matrix = ConfusionMatrix(names=model.names, save_matches=self.cfg.plots and self.cfg.visualize)
 
-    def get_desc(self):
+    def get_desc(self) -> str:
         """Return a formatted string summarizing class metrics of YOLO model."""
         return ("%22s" + "%11s" * 6) % ("Class", "Images", "Instances", "Box(P", "R", "mAP50", "mAP50-95)")
 
@@ -83,10 +115,10 @@ class YOLOEvaluator(BaseEvaluator):
             (list[dict[str, torch.Tensor]]): Processed predictions after NMS, where each dict contains 'bboxes', 'conf',
                 'cls', and 'extra' tensors.
         """
-        outputs = non_max_suppression(
+        outputs = nms.non_max_suppression(
             preds,
-            self.cfg.conf_threshold,
-            self.cfg.iou_threshold,
+            self.cfg.conf,
+            self.cfg.iou,
             nc=0 if self.cfg.task == "detect" else self.nc,
             multi_label=True,
             agnostic=self.cfg.single_cls or self.cfg.agnostic_nms,
@@ -136,11 +168,16 @@ class YOLOEvaluator(BaseEvaluator):
             pred["cls"] *= 0
         return pred
 
-    def update_metrics(self, preds: list[dict[str, torch.Tensor]], targets: dict[str, Any]) -> None:
-        """Update metrics state with a batch of predictions and ground truth targets."""
+    def update_metrics(self, preds: list[dict[str, torch.Tensor]], batch: dict[str, Any]) -> None:
+        """Update metrics with new predictions and ground truth.
+
+        Args:
+            preds (list[dict[str, torch.Tensor]]): List of predictions from the model.
+            batch (dict[str, Any]): Batch data containing ground truth.
+        """
         for si, pred in enumerate(preds):
             self.seen += 1
-            pbatch = self._prepare_batch(si, targets)
+            pbatch = self._prepare_batch(si, batch)
             predn = self._prepare_pred(pred)
 
             cls = pbatch["cls"].cpu().numpy()
@@ -157,33 +194,15 @@ class YOLOEvaluator(BaseEvaluator):
             )
             # Evaluate
             if self.cfg.plots:
-                self.confusion_matrix.process_batch(predn, pbatch, conf=self.args.conf)
+                self.confusion_matrix.process_batch(predn, pbatch, conf=self.cfg.conf)
                 if self.cfg.visualize:
-                    if self.confusion_matrix.matches:
-                        from vision_ai_platform.packages.utils.ops import xyxy2xywh
-                        labels = defaultdict(list)
-                        for i, mtype in enumerate(["GT", "FP", "TP", "FN"]):
-                            mbatch = self.confusion_matrix.matches[mtype]
-                            if "conf" not in mbatch:
-                                mbatch["conf"] = torch.tensor([1.0] * len(mbatch["bboxes"]), device=targets["img"][si].device)
-                            mbatch["batch_idx"] = torch.ones(len(mbatch["bboxes"]), device=targets["img"][si].device) * i
-                            for k in mbatch:
-                                labels[k] += mbatch[k]
-                        labels = {k: torch.stack(v, 0) if len(v) else torch.empty(0) for k, v in labels.items()}
-                        if self.task != "obb" and labels["bboxes"].shape[0]:
-                            labels["bboxes"] = xyxy2xywh(labels["bboxes"])
-                        (self.save_dir / "visualizations").mkdir(parents=True, exist_ok=True)
-                        self.plotter.plot_images(
-                            labels,
-                            targets["img"][si].repeat(4, 1, 1, 1),
-                            paths=["Ground Truth", "False Positives", "True Positives", "False Negatives"],
-                            fname=self.save_dir / "visualizations" / Path(pbatch["im_file"]).name,
-                            names=self.names,
-                            max_subplots=4,
-                            conf_thres=0.001,
-                            show_labels=self.cfg.show_labels,
-                            show_conf=self.cfg.show_conf,
-                        )
+                    self.confusion_matrix.plot_matches(
+                        batch["img"][si],
+                        pbatch["im_file"],
+                        self.save_dir,
+                        self.cfg.show_labels,
+                        self.cfg.show_conf,
+                    )
 
             if no_pred:
                 continue
@@ -246,14 +265,134 @@ class YOLOEvaluator(BaseEvaluator):
             self._gather_image_metrics(self.metrics.box)
             self.jdict = []
             self.metrics.clear_stats()
-        if self.args.plots and RANK > -1:
+        if self.cfg.plots and RANK > -1:
             matrix = torch.as_tensor(self.confusion_matrix.matrix, device=self.device)
             dist.reduce(matrix, dst=0, op=dist.ReduceOp.SUM)
             if RANK == 0:
                 self.confusion_matrix.matrix = matrix.cpu().numpy()
 
-    def compute_metrics(self) -> Dict[str, float]:
-        """Compute final evaluation metrics across all processed batches."""
+    def get_stats(self) -> dict[str, Any]:
+        """Calculate and return metrics statistics.
+
+        Returns:
+            (dict[str, Any]): Dictionary containing metrics results.
+        """
+        self.metrics.process(save_dir=self.save_dir, plot=self.cfg.plots, on_plot=self.on_plot)
+        self.metrics.clear_stats()
+        return self.metrics.results_dict
+
+    def print_results(self) -> None:
+        """Print training/validation set metrics per class."""
+        pf = "%22s" + "%11i" * 2 + "%11.3g" * len(self.metrics.keys)  # print format
+        LOGGER.info(pf % ("all", self.seen, self.metrics.nt_per_class.sum(), *self.metrics.mean_results()))
+        if self.metrics.nt_per_class.sum() == 0:
+            LOGGER.warning(f"no labels found in {self.cfg.task} set, cannot compute metrics without labels")
+
+        # Print results per class
+        if self.cfg.verbose and not self.training and self.nc > 1:
+            for i, c in enumerate(self.metrics.ap_class_index):
+                LOGGER.info(
+                    pf
+                    % (
+                        self.names[c],
+                        self.metrics.nt_per_image[c],
+                        self.metrics.nt_per_class[c],
+                        *self.metrics.class_result(i),
+                    )
+                )
+
+    def _process_batch(self, preds: dict[str, torch.Tensor], batch: dict[str, Any]) -> dict[str, np.ndarray]:
+        """Return correct prediction matrix.
+
+        Args:
+            preds (dict[str, torch.Tensor]): Dictionary containing prediction data with 'bboxes' and 'cls' keys.
+            batch (dict[str, Any]): Batch dictionary containing ground truth data with 'bboxes' and 'cls' keys.
+
+        Returns:
+            (dict[str, np.ndarray]): Dictionary containing 'tp' key with correct prediction matrix of shape (N, 10) for
+                10 IoU levels.
+        """
+        if batch["cls"].shape[0] == 0 or preds["cls"].shape[0] == 0:
+            return {"tp": np.zeros((preds["cls"].shape[0], self.niou), dtype=bool)}
+        iou = box_iou(batch["bboxes"], preds["bboxes"])
+        return {"tp": self.match_predictions(preds["cls"], batch["cls"], iou).cpu().numpy()}
+
+    def build_dataset(self, img_path: str, mode: str = "val", batch: int | None = None) -> torch.utils.data.Dataset:
+        """Build YOLO Dataset.
+
+        Args:
+            img_path (str): Path to the folder containing images.
+            mode (str): `train` mode or `val` mode, users are able to customize different augmentations for each mode.
+            batch (int, optional): Size of batches, this is for `rect`.
+
+        Returns:
+            (Dataset): YOLO dataset.
+        """
+        return build_yolo_dataset(self.cfg, img_path, batch, self.data, mode=mode, stride=self.stride)
+
+    def get_dataloader(self, dataset_path: str, batch_size: int) -> torch.utils.data.DataLoader:
+        """Construct and return dataloader.
+
+        Args:
+            dataset_path (str): Path to the dataset.
+            batch_size (int): Size of each batch.
+
+        Returns:
+            (torch.utils.data.DataLoader): DataLoader for validation.
+        """
+        dataset = self.build_dataset(dataset_path, batch=batch_size, mode="val")
+        return build_dataloader(
+            dataset,
+            batch_size,
+            self.cfg.workers,
+            shuffle=False,
+            rank=-1,
+            drop_last=self.cfg.compile,
+            pin_memory=self.training,
+        )
+
+    def plot_val_samples(self, batch: dict[str, Any], ni: int) -> None:
+        """Plot validation image samples.
+
+        Args:
+            batch (dict[str, Any]): Batch containing images and annotations.
+            ni (int): Batch index.
+        """
+        plot_images(
+            labels=batch,
+            paths=batch["im_file"],
+            fname=self.save_dir / f"val_batch{ni}_labels.jpg",
+            names=self.names,
+            on_plot=self.on_plot,
+        )
+
+    def plot_predictions(
+        self, batch: dict[str, Any], preds: list[dict[str, torch.Tensor]], ni: int, max_det: int | None = None
+    ) -> None:
+        """Plot predicted bounding boxes on input images and save the result.
+
+        Args:
+            batch (dict[str, Any]): Batch containing images and annotations.
+            preds (list[dict[str, torch.Tensor]]): List of predictions from the model.
+            ni (int): Batch index.
+            max_det (int | None): Maximum number of detections to plot.
+        """
+        if not preds:
+            return
+        for i, pred in enumerate(preds):
+            pred["batch_idx"] = torch.ones_like(pred["conf"]) * i  # add batch index to predictions
+        keys = preds[0].keys()
+        max_det = max_det or self.cfg.max_det
+        batched_preds = {k: torch.cat([x[k][:max_det] for x in preds], dim=0) for k in keys}
+        batched_preds["bboxes"] = ops.xyxy2xywh(batched_preds["bboxes"])  # convert to xywh format
+        plot_images(
+            images=batch["img"],
+            labels=batched_preds,
+            paths=batch["im_file"],
+            fname=self.save_dir / f"val_batch{ni}_pred.jpg",
+            names=self.names,
+            on_plot=self.on_plot,
+        )  # pred
 
     def save_one_txt(self, predn: dict[str, torch.Tensor], save_conf: bool, shape: tuple[int, int], file: Path) -> None:
         """Save YOLO detections to a txt file in normalized coordinates in a specific format.
@@ -272,40 +411,8 @@ class YOLOEvaluator(BaseEvaluator):
             names=self.names,
             boxes=torch.cat([predn["bboxes"], predn["conf"].unsqueeze(-1), predn["cls"].unsqueeze(-1)], dim=1),
         )
-
-        if results.semantic_mask is not None:
-            LOGGER.warning("Semantic Segmentation task does not support `save_txt`.")
-            return str(file)
-        
-        is_obb = results.obb is not None
-        boxes = results.obb if is_obb else results.boxes
-        masks = results.masks
-        probs = results.probs
-        kpts = results.keypoints
-        texts = []
-        if probs is not None:
-            # Classify
-            [texts.append(f"{probs.data[j]:.2f} {self.names[j]}") for j in probs.top5]
-        elif boxes:
-            # Detect/segment/pose
-            for j, d in enumerate(boxes):
-                c, conf, id = int(d.cls), float(d.conf), int(d.id.item()) if d.is_track else None
-                line = (c, *(d.xyxyxyxyn.view(-1) if is_obb else d.xywhn.view(-1)))
-                if masks:
-                    seg = masks[j].xyn[0].copy().reshape(-1)  # reversed mask.xyn, (n,2) to (n*2)
-                    line = (c, *seg)
-                if kpts is not None:
-                    kpt = torch.cat((kpts[j].xyn, kpts[j].conf[..., None]), 2) if kpts[j].has_visible else kpts[j].xyn
-                    line += (*kpt.reshape(-1).tolist(),)
-                line += (conf,) * save_conf + (() if id is None else (id,))
-                texts.append(("%g " * len(line)).rstrip() % line)
-
-        if texts:
-            Path(file).parent.mkdir(parents=True, exist_ok=True)  # make directory
-            with open(file, "a", encoding="utf-8") as f:
-                f.writelines(text + "\n" for text in texts)
-
-        return str(file)
+        save_txt(results, file, save_conf=save_conf)
+        del results
 
     def pred_to_json(self, predn: dict[str, torch.Tensor], pbatch: dict[str, Any]) -> None:
         """Serialize YOLO predictions to COCO json format.
@@ -395,7 +502,7 @@ class YOLOEvaluator(BaseEvaluator):
         Returns:
             (dict[str, Any]): Updated stats dictionary containing the computed COCO/LVIS evaluation metrics.
         """
-        if self.args.save_json and (self.is_coco or self.is_lvis) and len(self.jdict):
+        if self.cfg.save_json and (self.is_coco or self.is_lvis) and len(self.jdict):
             LOGGER.info(f"\nEvaluating faster-coco-eval mAP using {pred_json} and {anno_json}...")
             try:
                 for x in pred_json, anno_json:

@@ -61,11 +61,9 @@ class PaddleBackend(BaseBackend):
         # Load metadata
         metadata_file = (w if w.is_dir() else w.parent) / "metadata.yaml"
         if metadata_file.exists():
-            import yaml
+            from vision_ai_platform.packages.utils import YAML
 
-            with open(metadata_file, "r", encoding="utf-8") as f:
-                metadata = yaml.safe_load(f)
-            self.apply_metadata(metadata)
+            self.apply_metadata(YAML.load(metadata_file))
 
     def forward(self, im: torch.Tensor) -> list[np.ndarray]:
         """Run Baidu PaddlePaddle inference.

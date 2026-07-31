@@ -10,14 +10,15 @@ import shutil
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-import yaml
 from tqdm import tqdm
 
 import cv2
 import numpy as np
 from PIL import Image
 
-from vision_ai_platform.packages.utils import ASSETS_URL, DATASETS_DIR, LOGGER, NUM_THREADS, clean_url
+from vision_ai_platform.packages.utils import (
+    ASSETS_URL, DATASETS_DIR, LOGGER, NUM_THREADS, clean_url, YAML
+)
 from vision_ai_platform.packages.core.results import merge_multi_segment
 from vision_ai_platform.packages.utils.check import check_file
 from vision_ai_platform.packages.utils.downloads import download, zip_directory
@@ -608,7 +609,7 @@ def convert_to_multispectral(path: str | Path, n_channels: int = 10, replace: bo
         Convert a dataset
         >>> convert_to_multispectral("coco8", n_channels=10)
     """
-    from ultralytics.data.utils import IMG_FORMATS
+    from vision_ai_platform.packages.ai.data.utils import IMG_FORMATS
 
     path = Path(path)
     if path.is_dir():
@@ -713,7 +714,7 @@ async def convert_ndjson_to_yolo(ndjson_path: str | Path, output_path: str | Pat
         >>> model = YOLO("yolo26n.pt")
         >>> model.train(data="https://github.com/ultralytics/assets/releases/download/v0.0.0/coco8-ndjson.ndjson")
     """
-    from ultralytics.utils.checks import check_requirements
+    from vision_ai_platform.packages.utils.check import check_requirements
 
     check_requirements("aiohttp")
     import aiohttp

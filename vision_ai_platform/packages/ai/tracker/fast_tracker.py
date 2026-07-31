@@ -236,7 +236,7 @@ class FASTTracker(BYTETracker):
         )
         for inew in u_detection:
             det = detections[inew]
-            if det.score < self.args.new_track_thresh:
+            if det.score < self.cfg.new_track_thresh:
                 continue
             if (
                 suppress_on

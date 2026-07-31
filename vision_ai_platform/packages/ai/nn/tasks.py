@@ -8,7 +8,6 @@ import re
 import threading
 from copy import deepcopy
 from pathlib import Path
-import yaml
 
 import torch
 from torch import nn
@@ -87,6 +86,7 @@ from vision_ai_platform.packages.utils import (
     IterableSimpleNamespace,
     colorstr,
     emojis,
+    YAML,
 )
 from vision_ai_platform.packages.utils.check import REMOTE_FILE_PREFIXES, check_file, check_requirements, check_suffix, check_yaml
 from vision_ai_platform.packages.utils.loss import (
@@ -1311,7 +1311,7 @@ class YOLOEModel(DetectionModel):
 
         # Cache anchors for head
         device = next(self.parameters()).device
-        self(torch.empty(1, 3, self.args["imgsz"], self.args["imgsz"]).to(device))  # warmup
+        self(torch.empty(1, 3, self.cfg["imgsz"], self.cfg["imgsz"]).to(device))  # warmup
 
         cv3 = getattr(head, "one2one_cv3", head.cv3)
         cv2 = getattr(head, "one2one_cv2", head.cv2)
@@ -2155,8 +2155,7 @@ def yaml_model_load(path):
 
     unified_path = re.sub(r"(\d+)([nslmx])(.+)?$", r"\1\3", str(path))  # i.e. yolov8x.yaml -> yolov8.yaml
     yaml_file = check_yaml(unified_path, hard=False) or check_yaml(path)
-    with open(yaml_file, "r", encoding="utf-8") as f:
-        d = yaml.safe_load(f)  # model dict
+    d = YAML.load(yaml_file)
     d["scale"] = guess_model_scale(path)
     d["yaml_file"] = str(path)
     return d

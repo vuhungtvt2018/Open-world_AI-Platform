@@ -6,7 +6,6 @@ import glob
 import math
 import os
 import time
-import urllib
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -121,9 +120,6 @@ class LoadStreams:
             for i, s in enumerate(sources):  # index, source
                 # Start thread to read frames from video stream
                 st = f"{i + 1}/{n}: {s}... "
-                if urllib.parse.urlparse(s).hostname in {"www.youtube.com", "youtube.com", "youtu.be"}:  # YouTube video
-                    # YouTube format i.e. 'https://www.youtube.com/watch?v=Jsn8D3aC840' or 'https://youtu.be/Jsn8D3aC840'
-                    s = get_best_youtube_url(s)
                 s = int(s) if s.isnumeric() else s  # i.e. s = '0' local webcam
                 if s == 0 and (IS_COLAB or IS_KAGGLE):
                     raise NotImplementedError(

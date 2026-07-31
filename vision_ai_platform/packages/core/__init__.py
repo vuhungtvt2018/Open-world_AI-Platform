@@ -34,7 +34,7 @@ from .exceptions import (
 )
 
 from .predictor import BasePredictor
-from .evaluator import BaseEvaluator
+from .validator import BaseEvaluator
 from .tracker import BaseTracker
 from .trainer import BaseTrainer
 

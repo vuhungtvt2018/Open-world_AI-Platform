@@ -372,7 +372,7 @@ class TRACKTRACK:
         self.lost_stracks: list[TTSTrack] = []
         self.removed_stracks: list[TTSTrack] = []
         self.frame_id = 0
-        self.args = args
+        self.cfg = args
         self.max_time_lost = args.track_buffer
         self.kalman_filter = KalmanFilterXYWH()
 
@@ -449,8 +449,8 @@ class TRACKTRACK:
 
         scores = np.asarray(results.conf)  # keep masks numpy; numpy coerces a 1-element torch bool mask via __index__
         boxes = parse_bboxes(results)
-        high_mask = scores >= self.args.track_high_thresh
-        low_mask = (scores > self.args.track_low_thresh) & (scores < self.args.track_high_thresh)
+        high_mask = scores >= self.cfg.track_high_thresh
+        low_mask = (scores > self.cfg.track_low_thresh) & (scores < self.cfg.track_high_thresh)
 
         def _new_track(box, score, cls, feat=None):
             track = TTSTrack(box, score, cls, feat) if feat is not None else TTSTrack(box, score, cls)
@@ -459,7 +459,7 @@ class TRACKTRACK:
 
         high_boxes, high_scores, high_cls = boxes[high_mask], scores[high_mask], results.cls[high_mask]
         feats = kwargs.get("feats")
-        use_native = getattr(self.args, "model", "auto") == "auto"
+        use_native = getattr(self.cfg, "model", "auto") == "auto"
         encoder_input = None
         if self.encoder is not None and len(high_boxes) > 0:
             if use_native:
@@ -477,7 +477,7 @@ class TRACKTRACK:
         dets_recovered: list[TTSTrack] = []
         if dets_del is not None:
             del_xywh, del_conf, del_cls = dets_del
-            mask = del_conf > self.args.track_high_thresh
+            mask = del_conf > self.cfg.track_high_thresh
             if mask.any():
                 del_boxes = np.concatenate([del_xywh[mask], -np.ones((mask.sum(), 1))], axis=-1)
                 dets_recovered = [_new_track(b, s, c) for b, s, c in zip(del_boxes, del_conf[mask], del_cls[mask])]

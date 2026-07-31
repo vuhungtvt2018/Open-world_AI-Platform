@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 import torch
 from torch import nn
-import yaml
 
 from vision_ai_platform.packages.utils.check import check_suffix
 from vision_ai_platform.packages.utils.downloads import is_url
@@ -50,11 +49,9 @@ def check_class_names(names: list | dict) -> dict[int, str]:
                 f"{min(names.keys())}-{max(names.keys())} defined in your dataset YAML."
             )
         if isinstance(names[0], str) and names[0].startswith("n0"):  # imagenet class codes, i.e. 'n01440764'
-            from vision_ai_platform.packages.utils import ROOT
+            from vision_ai_platform.packages.utils import ROOT, YAML
 
-            with open(str(ROOT / "cfg/datasets/ImageNet.yaml"), "r", encoding="utf-8") as f:
-                names_dict = yaml.safe_load(f)
-                names_map = names_dict["map"]  # human-readable names
+            names_map = YAML.load(ROOT / "cfg/datasets/ImageNet.yaml")["map"]  # human-readable names
             names = {k: names_map[v] for k, v in names.items()}
     return names
 
@@ -70,11 +67,10 @@ def default_class_names(data: str | Path | None = None) -> dict[int, str]:
     """
     if data:
         try:
+            from vision_ai_platform.packages.utils import YAML
             from vision_ai_platform.packages.utils.check import check_yaml
 
-            yaml_path = check_yaml(data)
-            with open(yaml_path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f)["names"]
+            return YAML.load(check_yaml(data))["names"]
         except Exception:
             pass
     return {i: f"class{i}" for i in range(999)}  # return default if above errors

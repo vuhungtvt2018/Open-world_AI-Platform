@@ -1052,3 +1052,15 @@ def attempt_compile(
     else:
         LOGGER.info(f"{prefix} compile complete in {t_compile:.1f}s (no warmup)")
     return model
+
+
+def is_parallel(model):
+    """Return True if model is of type DP or DDP.
+
+    Args:
+        model (nn.Module): Model to check.
+
+    Returns:
+        (bool): True if model is DataParallel or DistributedDataParallel.
+    """
+    return isinstance(model, (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel))

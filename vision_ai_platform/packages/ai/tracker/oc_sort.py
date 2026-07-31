@@ -212,7 +212,7 @@ class OCSORT(BYTETracker):
     def get_dists(self, tracks: list[OCSortTrack], detections: list[OCSortTrack]) -> np.ndarray:
         """Cost matrix = IoU (+score-fuse) + inertia·OCM (+ optional appearance, via hook)."""
         iou_dists = matching.iou_distance(tracks, detections)
-        dists = matching.fuse_score(iou_dists, detections) if self.args.fuse_score else iou_dists.copy()
+        dists = matching.fuse_score(iou_dists, detections) if self.cfg.fuse_score else iou_dists.copy()
         dists = dists + self.inertia * self._velocity_direction_cost(tracks, detections)
         return self._fuse_appearance(dists, tracks, detections, iou_dists=iou_dists)
 
@@ -231,10 +231,10 @@ class OCSORT(BYTETracker):
         if not tracks or not dets:
             return list(range(len(tracks))), list(range(len(dets)))
         ocr_dists = self._ocr_distance(tracks, dets)
-        if self.args.fuse_score:
+        if self.cfg.fuse_score:
             ocr_dists = matching.fuse_score(ocr_dists, dets)
         ocr_dists = self._fuse_appearance(ocr_dists, tracks, dets)
-        matches, u_track, u_det = matching.linear_assignment(ocr_dists, thresh=self.args.match_thresh)
+        matches, u_track, u_det = matching.linear_assignment(ocr_dists, thresh=self.cfg.match_thresh)
         for itracked, idet in matches:
             track, det = tracks[itracked], dets[idet]
             if track.state == TrackState.Tracked:

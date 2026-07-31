@@ -119,22 +119,22 @@ class Exporter:
         _callbacks: Optional[Dict[str, list]] = None,
     ):
         if isinstance(cfg, ExporterConfig):
-            self.args = cfg
+            self.cfg = cfg
         elif isinstance(cfg, dict):
-            self.args = ExporterConfig.from_dict(cfg)
+            self.cfg = ExporterConfig.from_dict(cfg)
         else:
-            self.args = ExporterConfig()
+            self.cfg = ExporterConfig()
 
         if overrides:
             for k, v in overrides.items():
-                if hasattr(self.args, k):
-                    setattr(self.args, k, v)
+                if hasattr(self.cfg, k):
+                    setattr(self.cfg, k, v)
 
         self.callbacks = _callbacks or {}
         self.im: Optional[torch.Tensor] = None
         self.model: Optional[nn.Module] = None
         self.file: Optional[Path] = None
-        self.device = torch.device(self.args.device)
+        self.device = torch.device(self.cfg.device)
 
     def add_callback(self, event: str, callback: callable) -> None:
         """Register a callback function for export events."""
@@ -151,7 +151,7 @@ class Exporter:
         for p in model.parameters():
             p.requires_grad = False
 
-        if self.args.half and self.device.type != "cpu":
+        if self.cfg.half and self.device.type != "cpu":
             model = model.half()
         return model
 
@@ -167,12 +167,12 @@ class Exporter:
         
         # Prepare input dummy tensor matching precision and device
         self.im = prepare_dummy_input(
-            self.args.imgsz, batch=self.args.batch, device=self.args.device
+            self.cfg.imgsz, batch=self.cfg.batch, device=self.cfg.device
         )
-        if self.args.half and self.device.type != "cpu":
+        if self.cfg.half and self.device.type != "cpu":
             self.im = self.im.half()
 
-        fmt = self.args.format
+        fmt = self.cfg.format
         self.run_callbacks("on_export_start")
 
         # Route export execution based on target format
@@ -205,7 +205,7 @@ class Exporter:
         """Export PyTorch model to ONNX format."""
         output_path = self.file.with_suffix(".onnx")
         dynamic_axes = None
-        if self.args.dynamic:
+        if self.cfg.dynamic:
             dynamic_axes = {
                 "images": {0: "batch", 2: "height", 3: "width"},
                 "output": {0: "batch"},
@@ -216,13 +216,13 @@ class Exporter:
             self.im,
             str(output_path),
             verbose=False,
-            opset_version=self.args.opset or 17,
+            opset_version=self.cfg.opset or 17,
             input_names=["images"],
             output_names=["output"],
             dynamic_axes=dynamic_axes,
         )
 
-        if self.args.simplify:
+        if self.cfg.simplify:
             try:
                 import onnx
                 import onnxslim
@@ -263,9 +263,9 @@ class Exporter:
         builder = trt.Builder(logger)
         config = builder.create_builder_config()
 
-        if self.args.workspace:
+        if self.cfg.workspace:
             config.set_memory_pool_limit(
-                trt.MemoryPoolType.WORKSPACE, int(self.args.workspace * (1024**3))
+                trt.MemoryPoolType.WORKSPACE, int(self.cfg.workspace * (1024**3))
             )
 
         flag = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)

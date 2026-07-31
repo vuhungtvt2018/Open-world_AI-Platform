@@ -12,7 +12,6 @@ from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from tarfile import is_tarfile
 from typing import Any
-import yaml
 from tqdm import tqdm
 import shutil
 
@@ -28,6 +27,7 @@ from vision_ai_platform.packages.utils import (
     NUM_THREADS,
     ROOT,
     SETTINGS_FILE,
+    YAML,
     clean_url,
     colorstr,
     emojis,
@@ -631,9 +631,7 @@ def check_det_dataset(dataset: str, autodownload: bool = True, split: str = "") 
         extract_dir, autodownload = file.parent, False
 
     # Read YAML
-    with open(file, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    data["yaml_file"] = str(file)
+    data = YAML.load(file, append_filename=True)
 
     # Checks
     for k in "train", "val":
@@ -785,8 +783,7 @@ def check_cls_dataset(dataset: str | Path, split: str = "") -> dict[str, Any]:
         test_set = val_set
 
     if (ndjson_names := data_dir / ".ndjson.yaml").is_file():
-        with open(ndjson_names, "r", encoding="utf-8") as f:
-            names = yaml.safe_load(f)["names"]
+        names = YAML.load(ndjson_names)["names"]
     else:
         names = dict(enumerate(sorted(x.name for x in (data_dir / "train").iterdir() if x.is_dir())))
     nc = len(names)
@@ -862,11 +859,9 @@ class HUBDatasetStats:
             _, data_dir, yaml_path = self._unzip(Path(path))
             try:
                 # Load YAML with checks
-                with open(yaml_path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
+                data = YAML.load(yaml_path)
                 data["path"] = ""  # strip path since YAML should be in dataset root for all HUB datasets
-                with open(yaml_path, "w", encoding="utf-8") as f:
-                    yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+                YAML.save(yaml_path, data)
                 data = check_det_dataset(yaml_path, autodownload)  # dict
                 data["path"] = data_dir  # YAML path should be set to '' (relative) or parent (absolute)
             except Exception as e:

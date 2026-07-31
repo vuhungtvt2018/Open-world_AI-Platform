@@ -181,7 +181,7 @@ class BOTSORT(BYTETracker):
         if len(results) == 0:
             return []
         bboxes = parse_bboxes(results)
-        if self.args.with_reid and self.encoder is not None and img is not None:
+        if self.cfg.with_reid and self.encoder is not None and img is not None:
             features_keep = self.encoder(img, bboxes)
             return [BOTrack(xywh, s, c, f) for (xywh, s, c, f) in zip(bboxes, results.conf, results.cls, features_keep)]
         return [BOTrack(xywh, s, c) for (xywh, s, c) in zip(bboxes, results.conf, results.cls)]
@@ -191,10 +191,10 @@ class BOTSORT(BYTETracker):
         dists = matching.iou_distance(tracks, detections)
         dists_mask = dists > (1 - self.proximity_thresh)
 
-        if self.args.fuse_score:
+        if self.cfg.fuse_score:
             dists = matching.fuse_score(dists, detections)
 
-        if self.args.with_reid and self.encoder is not None:
+        if self.cfg.with_reid and self.encoder is not None:
             emb_dists = matching.embedding_distance(tracks, detections) / 2.0
             emb_dists[emb_dists > (1 - self.appearance_thresh)] = 1.0
             emb_dists[dists_mask] = 1.0

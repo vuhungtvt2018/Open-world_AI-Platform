@@ -184,6 +184,45 @@ def box_iou(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     union = area1 + area2.T - inter_area
     return inter_area / np.maximum(union, 1e-6)
 
+def mask_iou(mask1: torch.Tensor, mask2: torch.Tensor, eps: float = 1e-7) -> torch.Tensor:
+    """Calculate masks IoU.
+
+    Args:
+        mask1 (torch.Tensor): A tensor of shape (N, n) where N is the number of ground truth objects and n is the
+            product of image width and height.
+        mask2 (torch.Tensor): A tensor of shape (M, n) where M is the number of predicted objects and n is the product
+            of image width and height.
+        eps (float, optional): A small value to avoid division by zero.
+
+    Returns:
+        (torch.Tensor): A tensor of shape (N, M) representing masks IoU.
+    """
+    intersection = torch.matmul(mask1, mask2.T).clamp_(0)
+    union = (mask1.sum(1)[:, None] + mask2.sum(1)[None]) - intersection  # (area1 + area2) - intersection
+    return intersection / (union + eps)
+
+
+def kpt_iou(
+    kpt1: torch.Tensor, kpt2: torch.Tensor, area: torch.Tensor, sigma: list[float], eps: float = 1e-7
+) -> torch.Tensor:
+    """Calculate Object Keypoint Similarity (OKS).
+
+    Args:
+        kpt1 (torch.Tensor): A tensor of shape (N, 17, 3) representing ground truth keypoints.
+        kpt2 (torch.Tensor): A tensor of shape (M, 17, 3) representing predicted keypoints.
+        area (torch.Tensor): A tensor of shape (N,) representing areas from ground truth.
+        sigma (list[float]): A list containing 17 values representing keypoint scales.
+        eps (float, optional): A small value to avoid division by zero.
+
+    Returns:
+        (torch.Tensor): A tensor of shape (N, M) representing keypoint similarities.
+    """
+    d = (kpt1[:, None, :, 0] - kpt2[..., 0]).pow(2) + (kpt1[:, None, :, 1] - kpt2[..., 1]).pow(2)  # (N, M, 17)
+    sigma = torch.tensor(sigma, device=kpt1.device, dtype=kpt1.dtype)  # (17, )
+    kpt_mask = kpt1[..., 2] != 0  # (N, 17)
+    e = d / ((2 * sigma).pow(2) * (area[:, None, None] + eps) * 2)  # from cocoeval
+    # e = d / ((area[None, :, None] + eps) * sigma) ** 2 / 2  # from formula
+    return ((-e).exp() * kpt_mask[:, None]).sum(-1) / (kpt_mask.sum(-1)[:, None] + eps)
 
 def make_anchors(feats, strides, grid_cell_offset=0.5):
     """Generate anchors from features."""

@@ -2,11 +2,11 @@
 
 from functools import partial
 from pathlib import Path
-import yaml
 
 import torch
 
 from vision_ai_platform.packages.core.config import TrackerConfig
+from vision_ai_platform.packages.utils import YAML
 from vision_ai_platform.packages.utils.check import check_yaml
 
 from .bot_sort import BOTSORT
@@ -46,12 +46,7 @@ def on_predict_start(predictor: object, persist: bool = False) -> None:
         return
 
     tracker = check_yaml(predictor.args.tracker)
-    if isinstance(tracker, str):
-        with open(tracker, "r", encoding="utf-8") as f:
-            config_dict = yaml.safe_load(f)
-    else:
-        config_dict = {}
-    cfg = TrackerConfig(**config_dict)
+    cfg = TrackerConfig(**YAML.load(tracker))
     cfg.device = predictor.device  # run any ReID encoder on the predictor's device
 
     if cfg.tracker_type not in TRACKER_MAP:

@@ -14,3 +14,9 @@ scipy
 pyyaml
 pynvml
 thop
+mss
+pytubefix
+pafy
+yt_dlp
+faster-coco-eval
+pi-heif

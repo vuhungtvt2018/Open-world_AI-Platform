@@ -51,11 +51,9 @@ class NCNNBackend(BaseBackend):
         # Load metadata
         metadata_file = w.parent / "metadata.yaml"
         if metadata_file.exists():
-            import yaml
+            from vision_ai_platform.packages.utils import YAML
             
-            with open(metadata_file, "r", encoding="utf-8") as f:
-                metedata = yaml.safe_load(metadata_file)
-            self.apply_metadata(metedata)
+            self.apply_metadata(YAML.load(metadata_file))
 
     def forward(self, im: torch.Tensor) -> list[np.ndarray]:
         """Run inference using the NCNN runtime.

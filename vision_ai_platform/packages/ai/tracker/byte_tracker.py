@@ -224,7 +224,7 @@ class BYTETracker(BaseTracker):
             cfg (TrackerConfig / Namespace): Configuration containing tracking parameters.
         """
         super().__init__(cfg)
-        self.args = cfg  # Retain self.args reference if required by internal methods
+        self.cfg = cfg  # Retain self.cfg reference if required by internal methods
         self.max_frames_lost = getattr(cfg, "track_buffer", 30)
         self.kalman_filter = self.get_kalmanfilter()
         self.reset_id()
