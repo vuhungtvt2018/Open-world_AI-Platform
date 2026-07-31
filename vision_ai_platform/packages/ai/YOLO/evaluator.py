@@ -1,7 +1,7 @@
 from vision_ai_platform.packages.core.model import BaseEvaluator
 from vision_ai_platform.packages.core.config import EvaluatorConfig
 from vision_ai_platform.packages.utils import RANK, LOGGER
-from vision_ai_platform.packages.utils.check import check_requirements
+from vision_ai_platform.packages.utils.check import check_requirements, check_imgsz
 from vision_ai_platform.packages.utils.plotting import Plotter
 from vision_ai_platform.packages.utils.metrics import DetMetrics, ConfusionMatrix
 from vision_ai_platform.packages.utils.nms import non_max_suppression
@@ -14,11 +14,17 @@ from collections import defaultdict
 import os
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.distributed as dist
 
 class YOLOEvaluator(BaseEvaluator):
-    def __init__(self, cfg: EvaluatorConfig, model = None):
-        super().__init__(cfg, model)
+    def __init__(
+        self,
+        cfg: EvaluatorConfig,
+        model: nn.Module | None = None,
+        device: str = ""
+    ):
+        super().__init__(cfg, model, device)
         self.is_coco = False
         self.is_lvis = False
         self.class_map = None
@@ -39,7 +45,7 @@ class YOLOEvaluator(BaseEvaluator):
         for k, v in batch.items():
             if isinstance(v, torch.Tensor):
                 batch[k] = v.to(self.device, non_blocking=self.device.type == "cuda")
-        batch["img"] = (batch["img"].half() if self.args.quantize == 16 else batch["img"].float()) / 255
+        batch["img"] = (batch["img"].half() if self.cfg.quantize == 16 else batch["img"].float()) / 255
         return batch
 
     def init_metrics(self) -> None:
@@ -197,7 +203,7 @@ class YOLOEvaluator(BaseEvaluator):
 
     def finalize_metrics(self) -> None:
         """Set final values for metrics speed and confusion matrix."""
-        if self.args.plots:
+        if self.cfg.plots:
             for normalize in True, False:
                 self.confusion_matrix.plot(save_dir=self.save_dir, normalize=normalize, on_plot=self.on_plot)
         self.metrics.speed = self.speed

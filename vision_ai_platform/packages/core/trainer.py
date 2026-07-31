@@ -13,7 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from .config import TrainerConfig
+from .config import YOLOConfig
 
 class BaseTrainer(ABC):
     """Base class for training neural network models.
@@ -21,7 +21,7 @@ class BaseTrainer(ABC):
     Handles dataset setup, training loops, optimization, and saving checkpoints.
 
     Attributes:
-        cfg (TrainerConfig): Training configuration parameters.
+        cfg (YOLOConfig): Training configuration parameters.
         evaluator (BaseEvaluator): Evaluator instance.
         model (nn.Module): PyTorch model instance.
         save_dir (Path): Directory to save results.
@@ -44,9 +44,16 @@ class BaseTrainer(ABC):
         plots (dict): Dictionary of plots.
     """
 
-    def __init__(self, cfg: "TrainerConfig", model: Optional[nn.Module] = None) -> None:
+    def __init__(
+        self,
+        cfg: "YOLOConfig",
+        model: Optional[nn.Module] = None,
+        task: str = "detect",
+        device: str = "cpu",
+    ) -> None:
         """Initialize trainer with configuration and optional model instance."""
         self.cfg = cfg
+        self.task = task
         self.evaluator = None
         self.metrics = None
         self.plots = {}
@@ -63,6 +70,7 @@ class BaseTrainer(ABC):
 
         # Model and dataset
         self.model = model
+        self.device = device
         self.data = None
         self.ema = None
 
@@ -84,12 +92,13 @@ class BaseTrainer(ABC):
         self.nan_recovery_attempts = 0
 
     @abstractmethod
-    def build_dataset(self, data_path: str, mode: str = "train") -> Any:
+    def build_dataset(self, data_path: str, mode: str = "train", imgsz: int = 640) -> Any:
         """Construct data loader or dataset object.
 
         Args:
             data_path (str): Path to dataset or dataset config.
             mode (str): Data split mode ('train', 'val').
+            imgsz (int): Image size
         """
         raise NotImplementedError
 
@@ -129,7 +138,7 @@ class BaseTrainer(ABC):
         raise NotImplementedError("get_validator function not implemented in trainer")
 
     @abstractmethod
-    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
+    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train", workers: int=4):
         """Raise NotImplementedError (must return a `torch.utils.data.DataLoader` in subclasses)."""
         raise NotImplementedError("get_dataloader function not implemented in trainer")
 

@@ -6,6 +6,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Any, Optional
 import numpy as np
+import torch
 
 from .config import TrackerConfig
 

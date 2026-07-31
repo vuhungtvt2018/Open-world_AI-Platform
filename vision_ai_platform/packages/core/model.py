@@ -16,7 +16,7 @@ from .evaluator import BaseEvaluator
 from .trainer import BaseTrainer
 from .tracker import BaseTracker
 
-from .config import ModelConfig, TrackerConfig, TrainerConfig, EvaluatorConfig, PredictorConfig
+from .config import YOLOConfig, TrackerConfig
 
 class BaseModel(ABC):
     """Unified Base Class for models (referencing Ultralytics YOLO API).
@@ -24,18 +24,17 @@ class BaseModel(ABC):
     Aggregates training, prediction, evaluation, and tracking workflows.
 
     Attributes:
-        cfg (ModelConfig): Model architectural parameters.
+        cfg (YOLOConfig): Model architectural parameters.
         model (Optional[nn.Module]): Underlying PyTorch network.
         predictor (Optional[BasePredictor]): Active predictor instance.
         trainer (Optional[BaseTrainer]): Active trainer instance.
         evaluator (Optional[BaseEvaluator]): Active evaluator instance.
-        tracker (Optional[BaseTracker]): Active tracker instance.
         callbacks (Dict[str, List[Callable]]): Hooks for pipeline event customization.
     """
 
     def __init__(
         self, 
-        model_cfg: "ModelConfig", 
+        model_cfg: "YOLOConfig", 
         weights_path: Optional[str] = None
     ) -> None:
         """Initialize model architecture and optional weight checkpoint."""
@@ -48,7 +47,6 @@ class BaseModel(ABC):
         self.predictor: Optional[BasePredictor] = None
         self.trainer: Optional[BaseTrainer] = None
         self.evaluator: Optional[BaseEvaluator] = None
-        self.tracker: Optional["BaseTracker"] = None
         
         # Event callbacks map
         self.callbacks: Dict[str, List[Callable]] = {
@@ -78,13 +76,13 @@ class BaseModel(ABC):
     def predict(
         self, 
         source: Any, 
-        predict_cfg: Optional["PredictorConfig"] = None, 
+        predict_cfg: Optional["YOLOConfig"] = None, 
         **kwargs
     ) -> List[Any]:
         """Perform predictions on given image/video sources."""
         if self.predictor is None:
-            # Fallback initialization using given or default PredictorConfig
-            cfg = predict_cfg or PredictorConfig(**kwargs)
+            # Fallback initialization using given or default YOLOConfig
+            cfg = predict_cfg or YOLOConfig(**kwargs)
             self.predictor = self.get_predictor(cfg)
 
         self.run_callbacks("on_predict_start")
@@ -92,35 +90,15 @@ class BaseModel(ABC):
         self.run_callbacks("on_predict_end")
         return results
 
-    def track(
-        self, 
-        source: Any, 
-        tracker_cfg: Optional["TrackerConfig"] = None, 
-        **kwargs
-    ) -> List[Any]:
-        """Perform object tracking on video sequence or stream."""
-        if self.tracker is None:
-            cfg = tracker_cfg or TrackerConfig(**kwargs)
-            self.tracker = self.get_tracker(cfg)
-
-        # Runs model prediction and passes detected bboxes into tracker instance
-        detections = self.predict(source, **kwargs)
-        tracked_results = []
-        for det in detections:
-            tracks = self.tracker.update(det)
-            tracked_results.append(tracks)
-
-        return tracked_results
-
     def evaluate(
         self, 
         dataloader: Any, 
-        eval_cfg: Optional["EvaluatorConfig"] = None, 
+        eval_cfg: Optional["YOLOConfig"] = None, 
         **kwargs
     ) -> Dict[str, float]:
         """Validate/evaluate the model on a target dataset split."""
         if self.evaluator is None:
-            cfg = eval_cfg or EvaluatorConfig(**kwargs)
+            cfg = eval_cfg or YOLOConfig(**kwargs)
             self.evaluator = self.get_evaluator(cfg)
 
         return self.evaluator.evaluate(self.model, dataloader)
@@ -128,13 +106,12 @@ class BaseModel(ABC):
     def train(
         self, 
         data_path: str, 
-        train_cfg: Optional["TrainerConfig"] = None, 
+        train_cfg: Optional["YOLOConfig"] = None, 
         **kwargs
     ) -> Dict[str, Any]:
         """Train the model on a given dataset."""
         if self.trainer is None:
-            from __main__ import TrainerConfig
-            cfg = train_cfg or TrainerConfig(**kwargs)
+            cfg = train_cfg or YOLOConfig(**kwargs)
             self.trainer = self.get_trainer(cfg)
 
         self.run_callbacks("on_train_start")
@@ -144,23 +121,18 @@ class BaseModel(ABC):
 
     # Builder factory methods (to be overridden by subclasses like YOLO)
     @abstractmethod
-    def get_predictor(self, cfg: "PredictorConfig") -> BasePredictor:
+    def get_predictor(self) -> BasePredictor:
         """Factory method returning concrete Predictor implementation."""
         raise NotImplementedError
 
     @abstractmethod
-    def get_trainer(self, cfg: "TrainerConfig") -> BaseTrainer:
+    def get_trainer(self) -> BaseTrainer:
         """Factory method returning concrete Trainer implementation."""
         raise NotImplementedError
 
     @abstractmethod
-    def get_evaluator(self, cfg: "EvaluatorConfig") -> BaseEvaluator:
+    def get_evaluator(self) -> BaseEvaluator:
         """Factory method returning concrete Evaluator implementation."""
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_tracker(self, cfg: "TrackerConfig") -> "BaseTracker":
-        """Factory method returning concrete Tracker implementation."""
         raise NotImplementedError
 
     # Callback management

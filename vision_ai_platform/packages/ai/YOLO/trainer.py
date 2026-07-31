@@ -1,8 +1,9 @@
 from vision_ai_platform.packages.core.model import BaseTrainer
 from vision_ai_platform.packages.core.config import TrainerConfig
-from vision_ai_platform.packages.core.dataset import YOLODataset
+from vision_ai_platform.packages.ai.data import YOLODataset
 from vision_ai_platform.packages.utils import LOGGER, colorstr, emojis, RANK
-from vision_ai_platform.packages.utils.check import clean_url, normalize_platform_uri, check_imgsz
+from vision_ai_platform.packages.utils.files import get_latest_run
+from vision_ai_platform.packages.utils.check import clean_url, normalize_platform_uri, check_imgsz, check_file
 from vision_ai_platform.packages.utils.device_utils import (
     parse_device,
     select_device,
@@ -14,7 +15,9 @@ from vision_ai_platform.packages.utils.device_utils import (
 )
 from vision_ai_platform.packages.utils.check import check_amp
 from vision_ai_platform.packages.ai.optim import MuSGD
+from vision_ai_platform.packages.ai.nn.tasks import load_checkpoint
 from vision_ai_platform.packages.ai.nn.distill_model import DistillationModel
+from vision_ai_platform.packages.utils.device_utils import torch_distributed_zero_first
 
 from typing import Any, Optional, Dict
 from functools import partial
@@ -26,7 +29,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.distributed as dist
-from torch.utils.data.dataloader import DataLoader
+from torch.utils.data import Dataset, DataLoader
 
 
 def one_cycle(y1=0.0, y2=1.0, steps=100):
@@ -46,34 +49,55 @@ def one_cycle(y1=0.0, y2=1.0, steps=100):
 class YOLOTrainer(BaseTrainer):
     optimizers = {"Adam", "Adamax", "AdamW", "NAdam", "RAdam", "RMSprop", "SGD", "MuSGD", "auto"}
 
-    def __init__(self, cfg: TrainerConfig, model: Optional[nn.Module] = None, device: str | int | list | tuple | torch.device = ""):
-        super().__init__(cfg, model)
-        self.device = select_device(parse_device(device))
-
-    def build_dataset(self, data_path: str, mode: str = "train") -> DataLoader:
+    def build_dataset(self, data_path: str, mode: str = "train", imgsz: int = 640) -> Dataset:
         """Constructs and returns PyTorch DataLoader for training/validation splits."""
         is_train = mode == "train"
         dataset = YOLODataset(
             img_path=data_path,
-            imgsz=getattr(self.cfg, "imgsz", 640),
+            imgsz=imgsz,
             augment=is_train,
-            hyp=self.cfg.model_dump() if hasattr(self.cfg, "model_dump") else vars(self.cfg),
+            hyp=self.cfg,
             rect=not is_train,
         )
+        gs = max(int(unwrap_model(self.model).stride.max()), 32)
+        data = YOLODataset(
+            img_path=data_path,
+            imgsz=imgsz,
+            batch_size=self.cfg.batch_size,
+            augment=is_train,
+            hyp=self.cfg,
+            rect=not is_train,
+            single_cls=self.cfg.single_cls or False,
+            stride=gs,
+            pad=0.0 if is_train else 0.5,
+            prefix=colorstr(f"{mode}: "),
+            task=self.cfg.task,
+            classes=self.cfg.classes,
+            data=data,
+            fraction=self.cfg.fraction if is_train else 1.0,
+        )
 
-        dataloader = DataLoader(
+        return dataset
+
+    def get_dataloader(self, dataset_path, imgsz=640, batch_size=16, rank=0, mode="train", workers: int=4):
+        assert mode in {"train", "val"}, f"Mode must be 'train' or 'val', not {mode}."
+        with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
+            dataset = self.build_dataset(dataset_path, mode, imgsz)
+        is_train = mode == "train"
+        if getattr(dataset, "rect", False) and is_train and not np.all(dataset.batch_shapes == dataset.batch_shapes[0]):
+            LOGGER.warning("'rect=True' is incompatible with DataLoader shuffle, setting shuffle=False")
+            is_train = False
+
+        return DataLoader(
             dataset,
-            batch_size=self.batch_size,
+            batch_size=batch_size,
             shuffle=is_train,
-            num_workers=getattr(self.cfg, "workers", 4),
+            num_workers=workers if is_train else workers*2,
+            rank=rank,
             pin_memory=True,
             collate_fn=YOLODataset.collate_fn,
-            drop_last=is_train,
+            drop_last=self.cfg.compile and is_train,
         )
-        return dataloader
-
-    def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
-        return super().get_dataloader(dataset_path, batch_size, rank, mode)
 
     def build_optimizer(self) -> optim.Optimizer:
         """Initialize optimizer based on self.cfg parameters."""
@@ -312,16 +336,14 @@ class YOLOTrainer(BaseTrainer):
     def _setup_train(self):
         """Configure model, optimizer, dataloaders, and training utilities before the training loop."""
         self.weight_dir.mkdir(parents=True, exist_ok=True)
-        train_loader = self.build_dataset(self.data_path, mode="train")
+        train_loader = self.get_dataloader(self.data_path, batch_size=self.cfg.batch_size, rank=RANK, mode="train")
         self.optimizer = self.build_optimizer()
         self._setup_scheduler()
 
         # Freeze layers
         freeze_list = (
-            self.cfg.freeze
-            if isinstance(self.cfg.freeze, list)
-            else range(self.cfg.freeze)
-            if isinstance(self.cfg.freeze, int)
+            self.cfg.freeze if isinstance(self.cfg.freeze, list)
+            else range(self.cfg.freeze) if isinstance(self.cfg.freeze, int)
             else []
         )
         always_freeze_names = [".dfl"]  # always freeze these layers
@@ -348,10 +370,6 @@ class YOLOTrainer(BaseTrainer):
 
         # Check AMP
         self.amp = torch.tensor(self.cfg.amp).to(self.device)  # True or False
-        if self.amp and RANK in {-1, 0}:  # Single-GPU and DDP
-            # callbacks_backup = callbacks.default_callbacks.copy()  # backup callbacks as check_amp() resets them
-            self.amp = torch.tensor(check_amp(self.model), device=self.device)
-            # callbacks.default_callbacks = callbacks_backup  # restore callbacks
         if RANK > -1 and self.world_size > 1:  # DDP
             self.amp = self.amp.int()  # gloo errors with boolean
             dist.broadcast(self.amp, src=0)  # broadcast from rank 0 to all other ranks
@@ -384,53 +402,53 @@ class YOLOTrainer(BaseTrainer):
         self.stopper, self.stop = EarlyStopping(patience=self.cfg.patience), False
         self.scheduler.last_epoch = max(self.epoch - 1, 0)  # do not move
 
-    # def check_resume(self, overrides):
-    #     """Check if resume checkpoint exists and update arguments accordingly."""
-    #     resume = self.cfg.resume
-    #     if resume:
-    #         try:
-    #             exists = isinstance(resume, (str, Path)) and Path(resume).exists()
-    #             last = Path(check_file(resume) if exists else get_latest_run())
-    #             ckpt_args = load_checkpoint(last)[0].args
-    #             if not isinstance(ckpt_args["data"], dict) and not Path(ckpt_args["data"]).exists():
-    #                 ckpt_args["data"] = self.args.data
+    def check_resume(self, overrides):
+        """Check if resume checkpoint exists and update arguments accordingly."""
+        resume = self.cfg.resume
+        if resume:
+            try:
+                exists = isinstance(resume, (str, Path)) and Path(resume).exists()
+                last = Path(check_file(resume) if exists else get_latest_run())
+                ckpt_args = load_checkpoint(last)[0].args
+                if not isinstance(ckpt_args["data"], dict) and not Path(ckpt_args["data"]).exists():
+                    ckpt_args["data"] = self.args.data
 
-    #             resume = True
-    #             self.cfg = get_cfg(ckpt_args)
-    #             self.cfg.model = self.cfg.resume = str(last)  # reinstate model
-    #             for k in (
-    #                 "imgsz",
-    #                 "batch",
-    #                 "device",
-    #                 "close_mosaic",
-    #                 "augmentations",
-    #                 "save_period",
-    #                 "workers",
-    #                 "cache",
-    #                 "patience",
-    #                 "time",
-    #                 "freeze",
-    #                 "val",
-    #                 "plots",
-    #                 "distill_model",
-    #                 "save_dir",
-    #             ):  # allow arg updates to reduce memory or update device on resume
-    #                 if k in overrides:
-    #                     setattr(self.args, k, overrides[k])
+                resume = True
+                self.cfg = get_cfg(ckpt_args)
+                self.cfg.model = self.cfg.resume = str(last)  # reinstate model
+                for k in (
+                    "imgsz",
+                    "batch",
+                    "device",
+                    "close_mosaic",
+                    "augmentations",
+                    "save_period",
+                    "workers",
+                    "cache",
+                    "patience",
+                    "time",
+                    "freeze",
+                    "val",
+                    "plots",
+                    "distill_model",
+                    "save_dir",
+                ):  # allow arg updates to reduce memory or update device on resume
+                    if k in overrides:
+                        setattr(self.cfg, k, overrides[k])
 
-    #             # Handle augmentations parameter for resume: check if user provided custom augmentations
-    #             if ckpt_args.get("augmentations") is not None:
-    #                 # Augmentations were saved in checkpoint as reprs but can't be restored automatically
-    #                 LOGGER.warning(
-    #                     "Custom Albumentations transforms were used in the original training run but are not "
-    #                     "being restored. To preserve custom augmentations when resuming, you need to pass the "
-    #                     "'augmentations' parameter again to get expected results. Example: \n"
-    #                     f"model.train(resume=True, augmentations={ckpt_args['augmentations']})"
-    #                 )
+                # Handle augmentations parameter for resume: check if user provided custom augmentations
+                if ckpt_args.get("augmentations") is not None:
+                    # Augmentations were saved in checkpoint as reprs but can't be restored automatically
+                    LOGGER.warning(
+                        "Custom Albumentations transforms were used in the original training run but are not "
+                        "being restored. To preserve custom augmentations when resuming, you need to pass the "
+                        "'augmentations' parameter again to get expected results. Example: \n"
+                        f"model.train(resume=True, augmentations={ckpt_args['augmentations']})"
+                    )
 
-    #         except Exception as e:
-    #             raise FileNotFoundError(
-    #                 "Resume checkpoint not found. Please pass a valid checkpoint to resume from, "
-    #                 "i.e. 'yolo train resume model=path/to/last.pt'"
-    #             ) from e
-    #     self.resume = resume
+            except Exception as e:
+                raise FileNotFoundError(
+                    "Resume checkpoint not found. Please pass a valid checkpoint to resume from, "
+                    "i.e. 'yolo train resume model=path/to/last.pt'"
+                ) from e
+        self.resume = resume

@@ -102,7 +102,6 @@ from vision_ai_platform.packages.utils.loss import (
 )
 from vision_ai_platform.packages.utils.ops import make_divisible
 from vision_ai_platform.packages.utils.plotting import Plotter
-from ultralytics.utils.plotting import feature_visualization
 from vision_ai_platform.packages.utils.device_utils import (
     fuse_conv_and_bn,
     fuse_deconv_and_bn,
@@ -197,7 +196,8 @@ class BaseModel(torch.nn.Module):
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
+                plotter = Plotter(save_dir=visualize)
+                plotter.feature_visualization(x, m.type, m.i)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:
@@ -1068,7 +1068,8 @@ class RTDETRDetectionModel(DetectionModel):
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
+                plotter = Plotter(save_dir=visualize)
+                plotter.feature_visualization(x, m.type, m.i)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:
@@ -1186,7 +1187,8 @@ class WorldModel(DetectionModel):
 
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
+                plotter = Plotter(save_dir=visualize)
+                plotter.feature_visualization(x, m.type, m.i)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:
@@ -1429,7 +1431,8 @@ class YOLOEModel(DetectionModel):
 
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
+                plotter = Plotter(save_dir=visualize)
+                plotter.feature_visualization(x, m.type, m.i)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:

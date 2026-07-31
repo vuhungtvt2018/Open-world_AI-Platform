@@ -1,58 +1,163 @@
-from typing import List, Dict, Optional, Union, Literal, Tuple
-from pydantic import BaseModel, Field
+from typing import List, Optional, Tuple, Union, Literal
+from pydantic import BaseModel, Field, ConfigDict
 import yaml
 
 
 class BaseConfig(BaseModel):
     """Base configuration class with common Pydantic settings."""
-    class Config:
-        arbitrary_types_allowed = True
-        extra = "forbid"
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
 
 
-class DatasetConfig(BaseConfig):
-    """Configuration for dataset"""
-    data_path: str = Field(description="Path to dataset")
-    dataset_type: str = Field(
-        description=(
-            "Dataset type: 'yolo', 'depth', 'yolo-multimodal', "
-            "'grounding', 'yolo-concat', 'semantic', "
-            "'polygon-semantic', 'classification'"
-        )
+# ==============================================================================
+# YOLO MODEL CONFIG
+# ==============================================================================
+class YOLOConfig(BaseConfig):
+    """Configuration settings for YOLO models."""
+    # Common
+    task: Literal["detect", "segment", "semantic", "depth", "classify", "pose", "obb"] = Field(
+        default="detect", description="YOLO execution task"
     )
+    mode: Literal["train", "val", "predict", "export", "track", "benchmark"] = Field(
+        default="train", description="YOLO execution mode"
+    )
+    imgsz: Union[int, List[int], Tuple[int]] = Field(default=640, description="Image size for model")
+
+    # Predictor configuration
+    source: Optional[str] = Field(default=None, description="Path/dir/URL/stream for images or videos")
+    vid_stride: int = Field(default=1, ge=1, description="Read every Nth frame for video sources")
+    stream_buffer: bool = Field(default=False, description="Buffer all frames vs keep most recent frame")
+    visualize: bool = Field(default=False, description="Visualize model features")
+    augment: bool = Field(default=False, description="Apply test-time augmentation (TTA)")
+    agnostic_nms: bool = Field(default=False, description="Class-agnostic NMS")
+    classes: Optional[Union[int, List[int]]] = Field(default=None, description="Filter results by class id(s)")
+    retina_masks: bool = Field(default=False, description="High-resolution segmentation masks")
+    embed: Optional[List[int]] = Field(default=None, description="Return feature embeddings from layer indices")
+    conf: Optional[float] = Field(default=0.25, ge=0.0, le=1.0, description="Confidence threshold for predictions")
+    iou: float = Field(default=0.7, ge=0.0, le=1.0, description="IoU threshold for NMS")
+    max_det: int = Field(default=300, ge=1, description="Maximum number of detections per image")
+    
+    # Visualization options
+    show: bool = Field(default=False, description="Display images/videos in a window")
+    save_frames: bool = Field(default=False, description="Save individual frames from video predictions")
+    save_txt: bool = Field(default=False, description="Save results as .txt files")
+    save_conf: bool = Field(default=False, description="Save confidence scores with results")
+    save_crop: bool = Field(default=False, description="Save cropped prediction regions")
+    show_labels: bool = Field(default=True, description="Draw class labels")
+    show_conf: bool = Field(default=True, description="Draw confidence values")
+    show_boxes: bool = Field(default=True, description="Draw bounding boxes")
+    line_width: Optional[int] = Field(default=None, description="Line width of boxes")
+
+    # Training configuration
+    model: Optional[str] = Field(default=None, description="Path to model file")
+    data: Optional[str] = Field(default=None, description="Path to data config file")
+    epochs: int = Field(default=100, ge=1, description="Number of epochs to train for")
+    time: Optional[float] = Field(default=None, gt=0.0, description="Max hours to train")
+    patience: int = Field(default=100, ge=0, description="Early stopping patience")
+    batch: Union[int, float] = Field(default=16, description="Batch size (int) or AutoBatch fraction (float)")
+    save: bool = Field(default=True, description="Save checkpoints")
+    save_period: int = Field(default=-1, description="Checkpoint save frequency in epochs")
+    cache: Union[bool, Literal["ram", "disk"]] = Field(default=False, description="Cache images in RAM or disk")
+    device: Optional[Union[int, str, List[Union[int, str]]]] = Field(default=None, description="CUDA/CPU/MPS device specification")
+    workers: int = Field(default=8, ge=0, description="Dataloader workers")
+    project: Optional[str] = Field(default=None, description="Project name")
+    name: Optional[str] = Field(default=None, description="Experiment name")
+    exist_ok: bool = Field(default=False, description="Overwrite existing project/name dir")
+    pretrained: Union[bool, str] = Field(default=True, description="Use pretrained weights or path to file")
+    cls_remap: bool = Field(default=True, description="Remap pretrained classification head rows")
+    optimizer: str = Field(default="auto", description="Optimizer choice")
+    verbose: bool = Field(default=True, description="Verbose output logging")
+    seed: int = Field(default=0, description="Random seed")
+    deterministic: bool = Field(default=True, description="Enable deterministic operations")
+    single_cls: bool = Field(default=False, description="Treat multi-class dataset as single class")
+    rect: bool = Field(default=False, description="Rectangular training/val batches")
+    cos_lr: bool = Field(default=False, description="Use Cosine LR scheduler")
+    close_mosaic: int = Field(default=10, ge=0, description="Disable mosaic augmentation for final N epochs")
+    resume: bool = Field(default=False, description="Resume training from last checkpoint")
+    amp: bool = Field(default=True, description="Automatic Mixed Precision (AMP)")
+    fraction: float = Field(default=1.0, gt=0.0, le=1.0, description="Dataset fraction to use")
+    profile: bool = Field(default=False, description="Profile speeds for loggers")
+    freeze: Optional[Union[int, List[int]]] = Field(default=None, description="Freeze first N or specified layer indices")
+    multi_scale: float = Field(default=0.0, ge=0.0, description="Multi-scale range fraction")
+    compile: Union[bool, str] = Field(default=False, description="Enable torch.compile()")
+    channels_last: bool = Field(default=False, description="Use NHWC memory format")
+
+    # Task Specific Gains / Augmentations
+    overlap_mask: bool = Field(default=True, description="Overlap masks for instance segmentation")
+    mask_ratio: int = Field(default=4, ge=1, description="Mask downsample ratio")
+    dropout: float = Field(default=0.0, ge=0.0, le=1.0, description="Classification dropout")
+    
+    # Loss Gains & Hyperparameters
+    lr0: float = Field(default=0.01, gt=0.0, description="Initial learning rate")
+    lrf: float = Field(default=0.01, gt=0.0, description="Final learning rate fraction")
+    momentum: float = Field(default=0.937, ge=0.0, le=1.0, description="Momentum/beta1")
+    weight_decay: float = Field(default=0.0005, ge=0.0, description="Weight decay")
+    warmup_epochs: float = Field(default=3.0, ge=0.0, description="Warmup epochs")
+    warmup_momentum: float = Field(default=0.8, ge=0.0, le=1.0, description="Warmup initial momentum")
+    warmup_bias_lr: float = Field(default=0.1, ge=0.0, description="Warmup bias LR")
+    distill_model: Optional[str] = Field(default=None, description="Path to teacher model for distillation")
+    dis: float = Field(default=6.0, description="Distillation loss weight")
+    box: float = Field(default=7.5, description="Box loss gain")
+    cls: float = Field(default=0.5, description="Classification loss gain")
+    cls_pw: float = Field(default=0.0, description="Class weights power for class imbalance")
+    dfl: float = Field(default=1.5, description="Distribution Focal Loss gain")
+    pose: float = Field(default=12.0, description="Pose loss gain")
+    kobj: float = Field(default=1.0, description="Keypoint objectness gain")
+    rle: float = Field(default=1.0, description="RLE loss gain")
+    angle: float = Field(default=1.0, description="Oriented bounding box angle loss gain")
+    dlog: float = Field(default=1.0, description="Depth SILog loss gain")
+    dgrad: float = Field(default=0.5, description="Depth gradient loss gain")
+    dlam: float = Field(default=1.0, description="Depth SILog variance focus")
+    nbs: int = Field(default=64, description="Nominal batch size for loss normalization")
+    
+    # Augmentation Probabilities & Hyperparameters
+    hsv_h: float = Field(default=0.015, ge=0.0, le=1.0, description="HSV Hue fraction")
+    hsv_s: float = Field(default=0.7, ge=0.0, le=1.0, description="HSV Saturation fraction")
+    hsv_v: float = Field(default=0.4, ge=0.0, le=1.0, description="HSV Value fraction")
+    degrees: float = Field(default=0.0, description="Rotation degrees")
+    translate: float = Field(default=0.1, description="Translation fraction")
+    scale: Union[float, Tuple[float, float]] = Field(default=0.5, description="Scale gain (+/-) or explicit min/max tuple")
+    shear: float = Field(default=0.0, description="Shear degrees")
+    perspective: float = Field(default=0.0, description="Perspective fraction")
+    flipud: float = Field(default=0.0, ge=0.0, le=1.0, description="Vertical flip probability")
+    fliplr: float = Field(default=0.5, ge=0.0, le=1.0, description="Horizontal flip probability")
+    bgr: float = Field(default=0.0, ge=0.0, le=1.0, description="BGR channel swap probability")
+    mosaic: float = Field(default=1.0, ge=0.0, le=1.0, description="Mosaic probability")
+    mixup: float = Field(default=0.0, ge=0.0, le=1.0, description="MixUp probability")
+    cutmix: float = Field(default=0.0, ge=0.0, le=1.0, description="CutMix probability")
+    copy_paste: float = Field(default=0.0, ge=0.0, le=1.0, description="Copy-paste probability")
+    copy_paste_mode: Literal["flip", "mixup"] = Field(default="flip", description="Copy-paste strategy")
+    auto_augment: str = Field(default="randaugment", description="Classification auto-augmentation policy")
+    erasing: float = Field(default=0.4, ge=0.0, le=1.0, description="Random erasing probability")
+
+    # Evaluation configuration
+    val: bool = Field(default=True, description="Run validation during training")
+    split: Literal["val", "test", "train"] = Field(default="val", description="Dataset split to evaluate")
+    save_json: bool = Field(default=False, description="Save COCO JSON or PNG masks for external evaluation")
+    conf: Optional[float] = Field(default=0.001, ge=0.0, le=1.0, description="Confidence threshold for evaluation")
+    iou: float = Field(default=0.7, ge=0.0, le=1.0, description="IoU threshold for NMS")
+    max_det: int = Field(default=300, ge=1, description="Maximum detections per image")
+    quantize: Optional[Union[int, str]] = Field(default=None, description="Precision quantization settings")
+    dnn: bool = Field(default=False, description="Use OpenCV DNN for ONNX inference")
+    plots: bool = Field(default=True, description="Save plots and images during evaluation")
+    end2end: Optional[bool] = Field(default=None, description="Use end2end head (e.g. YOLOv10/YOLO26)")
 
 
-class ModelConfig(BaseConfig):
-    """Configuration for model architecture and weights."""
-    model_path: str = Field(
-        default="yolov8n.pt", 
-        description="Path to model weights file or pretrained model identifier (e.g., 'yolov8n.pt', 'yolov8x.yaml')"
+# ==============================================================================
+# TRACKER CONFIG
+# ==============================================================================
+class TrackerConfig(BaseConfig):
+    """Configuration settings for object tracking algorithms."""
+    tracker_type: str = Field(
+        default="tracktrack.yaml",
+        alias="tracker",
+        description="Tracker config file (e.g. botsort.yaml, bytetrack.yaml, tracktrack.yaml)"
     )
-    task: str = Field(
-        default="detect", 
-        description="Task type: 'detect', 'segment', 'classify', 'pose', 'obb'"
-    )
-    num_classes: Optional[int] = Field(
-        default=None, 
-        description="Number of target classes (overrides model default if set)"
-    )
-    imgsz: Union[int, List[int]] = Field(
-        default=640, 
-        description="Input image size as integer (640) or list [height, width]"
-    )
-    device: str = Field(
-        default="0", 
-        description="CUDA device(s) e.g. '0', '0,1,2,3', 'cpu', or 'mps'"
-    )
-    workers: int = Field(
-        default=8, 
-        ge=0, 
-        description="Number of worker threads for dataloading"
-    )
-    half: bool = Field(
-        default=False, 
-        description="Use FP16 half-precision inference"
-    )
+    track_high_thresh: float = Field(default=0.5, description="High confidence threshold for tracking")
+    track_low_thresh: float = Field(default=0.1, description="Low confidence threshold for tracking")
+    new_track_thresh: float = Field(default=0.6, description="Threshold for creating new tracks")
+    match_thresh: float = Field(default=0.8, description="Matching threshold for association")
+    track_buffer: int = Field(default=30, description="Frames to keep lost tracks active")
+    fuse_score: bool = Field(default=False, description="Fuse classification score with IoU distance")
 
 
 class HardwareConfig(BaseConfig):
@@ -69,130 +174,6 @@ class HardwareConfig(BaseConfig):
     half: bool = Field(
         default=False, 
         description="Use FP16 half-precision inference"
-    )
-
-
-class PredictorConfig(BaseConfig):
-    """Configuration for inference / prediction."""
-    conf_threshold: float = Field(
-        default=0.25, 
-        ge=0.0, 
-        le=1.0, 
-        alias="conf",
-        description="Object confidence threshold for detection"
-    )
-    iou_threshold: float = Field(
-        default=0.7, 
-        ge=0.0, 
-        le=1.0, 
-        alias="iou",
-        description="Intersection Over Union (IoU) threshold for NMS"
-    )
-    max_det: int = Field(
-        default=300, 
-        ge=1, 
-        description="Maximum number of detections per image"
-    )
-    classes: Optional[List[int]] = Field(
-        default=None, 
-        description="Filter results by class IDs, e.g. [0, 2, 3]"
-    )
-    agnostic_nms: bool = Field(
-        default=False, 
-        description="Class-agnostic NMS"
-    )
-    save_txt: bool = Field(
-        default=False, 
-        description="Save results to a text file"
-    )
-    save_conf: bool = Field(
-        default=False, 
-        description="Save confidences in exported text results"
-    )
-
-
-class TrainerConfig(BaseConfig):
-    """Configuration for training models."""
-    save_dir: str = Field(default="run", description="Directory path to save training results")
-    epochs: int = Field(default=100, ge=1, description="Number of training epochs")
-    save_period: int = Field(default=10, ge=1, description="Save checkpoint every N epochs")
-    amp: bool = Field(default=True, description="Automatic Mixed Precision (AMP) training")
-    batch_size: int = Field(default=16, ge=-1, alias="batch", description="Batch size (-1 for AutoBatch)")
-    resume: bool = Field(default=False, description="Resume training from last checkpoint in the run dir")
-    optimizer: str = Field(
-        default="auto", 
-        description="Optimizer choice: 'SGD', 'MuSGD', 'Adam', 'Adamax', 'AdamW', 'NAdam', 'RAdam', 'RMSProp', or 'auto'"
-    )
-    lr0: float = Field(default=0.01, gt=0.0, description="Initial learning rate")
-    lrf: float = Field(default=0.01, gt=0.0, description="Final learning rate fraction (lr0 * lrf)")
-    alpha: float = Field(default=0.99, gt=0.0, description="RMSProp alpha")
-    beta1: float = Field(default=0.9, gt=0.0, description="Adam/AdamW beta1")
-    beta2: float = Field(default=0.99, gt=0.0, description="Adam/AdamW beta2")
-    momentum: float = Field(default=0.937, ge=0.0, le=1.0, description="SGD momentum")
-    weight_decay: float = Field(default=0.0005, ge=0.0, description="Optimizer weight decay")
-    eps: float = Field(default=1e-8, ge=0.0, description="Epsilon to avoid division by 0")
-    warmup_epochs: float = Field(default=3.0, ge=0.0, description="Warmup epochs")
-    warmup_bias_lr: float = Field(default=0.1, ge=0.0, description="Bias learning rate during warmup")
-    patience: int = Field(default=50, ge=0, description="Early stopping patience (epochs without improvement)")
-    cos_lr: bool = Field(default=False, description="Use cosine learning rate scheduler")
-    
-    # Common Data Augmentations (Ultralytics defaults)
-    hsv_h: float = Field(default=0.015, ge=0.0, le=1.0, description="HSV-Hue augmentation fraction")
-    hsv_s: float = Field(default=0.7, ge=0.0, le=1.0, description="HSV-Saturation augmentation fraction")
-    hsv_v: float = Field(default=0.4, ge=0.0, le=1.0, description="HSV-Value augmentation fraction")
-    degrees: float = Field(default=0.0, description="Image rotation (+/- deg)")
-    translate: float = Field(default=0.1, ge=0.0, le=1.0, description="Image translation (+/- fraction)")
-    scale: float = Field(default=0.5, ge=0.0, description="Image scale (+/- gain)")
-    fliplr: float = Field(default=0.5, ge=0.0, le=1.0, description="Image flip left-right probability")
-    mosaic: float = Field(default=1.0, ge=0.0, le=1.0, description="Image mosaic probability")
-
-
-class EvaluatorConfig(BaseConfig):
-    """Configuration for evaluation / validation metrics."""
-    split: str = Field(default="val", description="Dataset split to evaluate on ('val', 'test')")
-    save_json: bool = Field(default=False, description="Save results to JSON file for COCO evaluation")
-    save_txt: bool = Field(default=False, description="Save results as .txt files (xywh format)")
-    save_conf: bool = Field(default=False, description="Save confidence scores with results")
-    plots: bool = Field(default=True, description="Save plots and charts during evaluation")
-    visualize: bool = Field(default=True, description="Save images during evaluation")
-    rect: bool = Field(default=False, description="Use rectangular testing for faster inference")
-    save_dir: str = Field(default="results", description="Directory to save evaluation results")
-    show_labels: bool = Field(default=True, description="Whether to display class labels in the visualization")
-    show_conf: bool = Field(default=True, description="Whether to display confidence values in the visualization")
-    task: str = Field(default="detect", description="Ultralytics task, values: detect, classify, semantic, segment, obb, pose")
-    conf_threshold: float = Field(default=0.25, ge=0.0, le=1.0, alias="conf", description="Object confidence threshold for detection")
-    iou_threshold: float = Field(default=0.7, ge=0.0, le=1.0, alias="iou", description="Intersection Over Union (IoU) threshold for NMS")
-    max_det: int = Field(default=300, ge=1, description="Maximum number of detections per image")
-    classes: Optional[List[int]] = Field(default=None, description="Filter results by class IDs, e.g. [0, 2, 3]")
-    agnostic_nms: bool = Field(default=False, description="Class-agnostic NMS")
-    single_cls: bool = Field(default=False, description="If True, single class training is used.")
-
-
-class TrackerConfig(BaseConfig):
-    """Configuration for multi-object tracking (e.g., ByteTrack / BotSORT)."""
-    tracker_type: str = Field(
-        default="bytetrack", 
-        description="Tracking algorithm: 'bytetrack' or 'botsort'"
-    )
-    track_high_thresh: float = Field(
-        default=0.5, 
-        description="Threshold for first association step in ByteTrack"
-    )
-    track_low_thresh: float = Field(
-        default=0.1, 
-        description="Threshold for second association step"
-    )
-    new_track_thresh: float = Field(
-        default=0.6, 
-        description="Threshold to initiate a new track"
-    )
-    track_buffer: int = Field(
-        default=30, 
-        description="Frames to keep lost tracks active"
-    )
-    match_thresh: float = Field(
-        default=0.8, 
-        description="Matching threshold for data association"
     )
 
 
@@ -266,35 +247,24 @@ class AppConfig(BaseConfig):
     data_path: str = Field(default="coco8.yaml", description="Path to dataset configuration YAML or directory")
     
     # Sub-configurations
-    model: ModelConfig = Field(default_factory=ModelConfig)
+    model: YOLOConfig = Field(default_factory=YOLOConfig)
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
-    predictor: PredictorConfig = Field(default_factory=PredictorConfig)
-    trainer: TrainerConfig = Field(default_factory=TrainerConfig)
-    evaluator: EvaluatorConfig = Field(default_factory=EvaluatorConfig)
     tracker: TrackerConfig = Field(default_factory=TrackerConfig)
 
 
 def get_config_from_yaml(config_file: str, config_type: str):
     with open(config_file, "r", encoding="utf-8") as f:
         config_dict = yaml.safe_load(f)
-    if config_type == "model":
-        return ModelConfig.model_validate(config_dict)
-    elif config_type == "predictor":
-        return PredictorConfig.model_validate(config_dict)
-    elif config_type == "trainer":
-        return TrainerConfig.model_validate(config_dict)
-    elif config_type == "evaluator":
-        return EvaluatorConfig.model_validate(config_dict)
+    if config_type == "model" or config_type == "yolo":
+        return YOLOConfig.model_validate(config_dict)
     elif config_type == "tracker":
         return TrackerConfig.model_validate(config_dict)
     elif config_type == "exporter":
         return ExporterConfig.model_validate(config_dict)
-    elif config_type == "dataset":
-        return DatasetConfig.model_validate(config_dict)
     elif config_type == "app":
         return AppConfig.model_validate(config_dict)
     else:
         raise ValueError(
             "Value of config_type must be in the following list: "
-            "['model', 'predictor', 'trainer', 'evaluator', 'tracker', 'exporter', 'dataset', 'app']"
+            "['model', 'yolo', 'tracker', 'exporter', 'app']"
         )

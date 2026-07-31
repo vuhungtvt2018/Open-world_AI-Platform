@@ -5,7 +5,7 @@ import re
 import threading
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Optional, Dict
+from typing import Any, Callable, Optional, Dict, Union, List, Tuple
 import time
 
 import cv2
@@ -13,23 +13,48 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .config import EvaluatorConfig
+from .config import YOLOConfig
 
 class BaseEvaluator(ABC):
     """Base class for validating models and calculating evaluation metrics.
 
     Attributes:
-        cfg (EvaluatorConfig): Validation parameters.
+        cfg (YOLOConfig): Validation parameters.
         model (nn.Module): Model being evaluated.
         metrics (Dict[str, float]): Computed evaluation metrics (mAP, Precision, Recall).
     """
 
-    def __init__(self, cfg: "EvaluatorConfig", model: Optional[nn.Module] = None) -> None:
+    def __init__(
+        self,
+        cfg: "YOLOConfig",
+        model: Optional[nn.Module] = None,
+        imgsz: Union[List[int, int], Tuple[int, int], int] = (640, 640),
+        device: str = "cpu"
+    ) -> None:
         """Initialize evaluator with configuration."""
         self.cfg = cfg
         self.model = model
         self.metrics = None
         self.save_dir = cfg.save_dir
+        self.dataloader = None
+        self.stride = None
+        self.data = None
+        self.device = device
+        self.batch_i = None
+        self.training = True
+        self.names = None
+        self.seen = None
+        self.stats = None
+        self.confusion_matrix = None
+        self.nc = None
+        self.iouv = None
+        self.jdict = None
+        self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
+
+        self.save_dir = Path(self.cfg.save_dir)
+        (self.save_dir / "labels" if self.cfg.save_txt else self.save_dir).mkdir(parents=True, exist_ok=True)
+        if self.cfg.conf_threshold is None:
+            self.cfg.conf_threshold = 0.01 if self.cfg.task == "obb" else 0.001  # reduce OBB val memory usage
 
         self.plots = {}
 

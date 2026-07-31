@@ -1,12 +1,9 @@
 from .config import (
     BaseConfig,
     AppConfig,
-    ModelConfig,
+    YOLOConfig,
     TrackerConfig,
-    EvaluatorConfig,
-    TrainerConfig,
     HardwareConfig,
-    PredictorConfig,
 )
 
 from .exceptions import (

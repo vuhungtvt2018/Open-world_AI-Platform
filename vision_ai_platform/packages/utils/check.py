@@ -838,12 +838,6 @@ def check_amp(model):
 
     Returns:
         (bool): Returns True if the AMP functionality works correctly with YOLO model, else False.
-
-    Examples:
-        >>> from ultralytics import YOLO
-        >>> from ultralytics.utils.checks import check_amp
-        >>> model = YOLO("yolo26n.pt").model.cuda()
-        >>> check_amp(model)
     """
     from vision_ai_platform.packages.utils.device_utils import autocast
 
@@ -879,9 +873,7 @@ def check_amp(model):
     LOGGER.info(f"{prefix}running Automatic Mixed Precision (AMP) checks...")
     warning_msg = "Setting 'amp=True'. If you experience zero-mAP or NaN losses you can disable AMP with amp=False."
     try:
-        from ultralytics import YOLO
-
-        assert amp_allclose(YOLO("yolo26n.pt"), im)
+        assert amp_allclose(model, im)
         LOGGER.info(f"{prefix}checks passed ✅")
     except ConnectionError:
         LOGGER.warning(f"{prefix}checks skipped. Offline and unable to download YOLO26n for AMP checks. {warning_msg}")
