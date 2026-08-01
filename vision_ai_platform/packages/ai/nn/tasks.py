@@ -12,7 +12,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
-from .backends import check_class_names
+from .autobackend import check_class_names
 from .modules import (
     AIFI,
     C1,
@@ -77,13 +77,14 @@ from .modules import (
     YOLOESegment26,
     v10Detect,
 )
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.utils import (
+    DEFAULT_CFG,
     DEFAULT_CFG_DICT,
     LOGGER,
     SAFE_LOAD,
     SETTINGS,
     WINDOWS,
-    IterableSimpleNamespace,
     colorstr,
     emojis,
     YAML,
@@ -101,7 +102,7 @@ from vision_ai_platform.packages.utils.loss import (
     v8SegmentationLoss,
 )
 from vision_ai_platform.packages.utils.ops import make_divisible
-from vision_ai_platform.packages.utils.plotting import Plotter
+from vision_ai_platform.packages.utils.plotting import feature_visualization
 from vision_ai_platform.packages.utils.device_utils import (
     fuse_conv_and_bn,
     fuse_deconv_and_bn,
@@ -196,8 +197,7 @@ class BaseModel(torch.nn.Module):
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                plotter = Plotter(save_dir=visualize)
-                plotter.feature_visualization(x, m.type, m.i)
+                feature_visualization(x, m.type, m.i, save_dir=visualize)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:
@@ -1068,8 +1068,7 @@ class RTDETRDetectionModel(DetectionModel):
             x = m(x)  # run
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                plotter = Plotter(save_dir=visualize)
-                plotter.feature_visualization(x, m.type, m.i)
+                feature_visualization(x, m.type, m.i, save_dir=visualize)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:
@@ -1187,8 +1186,7 @@ class WorldModel(DetectionModel):
 
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                plotter = Plotter(save_dir=visualize)
-                plotter.feature_visualization(x, m.type, m.i)
+                feature_visualization(x, m.type, m.i, save_dir=visualize)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:
@@ -1431,8 +1429,7 @@ class YOLOEModel(DetectionModel):
 
             y.append(x if m.i in self.save else None)  # save output
             if visualize:
-                plotter = Plotter(save_dir=visualize)
-                plotter.feature_visualization(x, m.type, m.i)
+                feature_visualization(x, m.type, m.i, save_dir=visualize)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:
@@ -1586,15 +1583,15 @@ def temporary_modules(modules=None, attributes=None):
     from importlib import import_module
 
     try:
+        # Set modules in sys.modules under their old name
+        for old, new in modules.items():
+            sys.modules[old] = import_module(new)
+        
         # Set attributes in sys.modules under their old name
         for old, new in attributes.items():
             old_module, old_attr = old.rsplit(".", 1)
             new_module, new_attr = new.rsplit(".", 1)
-            setattr(import_module(old_module), old_attr, getattr(import_module(new_module), new_attr))
-
-        # Set modules in sys.modules under their old name
-        for old, new in modules.items():
-            sys.modules[old] = import_module(new)
+            setattr(import_module(old_module), old_attr, getattr(import_module(new_module), new_attr))        
 
         yield
     finally:
@@ -1709,8 +1706,12 @@ class _SafeLoad:
         _scan(ul_tasks)  # ultralytics task models
 
         # Non-nn.Module data globals in official checkpoints, incl. the pre-8.0.44 `ultralytics.yolo.utils` path.
-        allow.append(IterableSimpleNamespace)
-        allow.append((IterableSimpleNamespace, "ultralytics.yolo.utils.IterableSimpleNamespace"))
+        allow.append(YOLOConfig)
+        allow.append((YOLOConfig, "vision_ai_platform.packages.core.config.YOLOConfig"))
+
+        allow.append(DetectionModel)
+        allow.append((DetectionModel, "ultralytics.nn.tasks.DetectionModel"))
+        allow.append((DetectionModel, "vision_ai_platform.packages.ai.nn.tasks.DetectionModel"))
 
         # Classification preprocessing transforms.
         try:
@@ -1783,15 +1784,26 @@ def torch_safe_load(weight, safe_only=None):
     def _load():
         with temporary_modules(
             modules={
-                "ultralytics.yolo.utils": "ultralytics.utils",
-                "ultralytics.yolo.v8": "ultralytics.models.yolo",
-                "ultralytics.yolo.data": "ultralytics.data",
+                # Core module aliases
+                "ultralytics": "vision_ai_platform.packages.ai",
+                "ultralytics.nn": "vision_ai_platform.packages.ai.nn",
+                "ultralytics.nn.tasks": "vision_ai_platform.packages.ai.nn.tasks",
+                "ultralytics.nn.modules": "vision_ai_platform.packages.ai.nn.modules",
+                "ultralytics.models": "vision_ai_platform.packages.ai.models",
+                "ultralytics.models.yolo": "vision_ai_platform.packages.ai.models.yolo",
+                "ultralytics.data": "vision_ai_platform.packages.ai.data",
+                "ultralytics.utils": "vision_ai_platform.packages.utils",
+                # Legacy / Backwards Compatibility paths
+                "ultralytics.yolo.utils": "vision_ai_platform.packages.utils",
+                "ultralytics.yolo.v8": "vision_ai_platform.packages.ai.models.yolo",
+                "ultralytics.yolo.data": "vision_ai_platform.packages.ai.data",
             },
             attributes={
-                "ultralytics.nn.modules.block.Silence": "torch.nn.Identity",  # YOLOv9e
-                "ultralytics.nn.tasks.YOLOv10DetectionModel": "ultralytics.nn.tasks.DetectionModel",  # YOLOv10
-                "ultralytics.utils.loss.v10DetectLoss": "ultralytics.utils.loss.E2EDetectLoss",  # YOLOv10
-                # resolve cross-platform pathlib pickle incompatibility
+                # Custom layer & model redirections
+                "ultralytics.nn.modules.block.Silence": "torch.nn.Identity",
+                "ultralytics.nn.tasks.YOLOv10DetectionModel": "vision_ai_platform.packages.ai.nn.tasks.DetectionModel",
+                "ultralytics.utils.loss.v10DetectLoss": "vision_ai_platform.packages.utils.loss.E2EDetectLoss",
+                # Cross-platform pathlib compatibility
                 **(
                     {"pathlib.PosixPath": "pathlib.WindowsPath"}
                     if WINDOWS
@@ -1802,7 +1814,7 @@ def torch_safe_load(weight, safe_only=None):
             if safe_only:
                 with _SafeLoad.loading():  # weights_only load scoped to the known-class allow-list
                     return torch.load(file, map_location="cpu", weights_only=True)
-            return torch.load(file, map_location="cpu")
+            return torch.load(file, map_location="cpu", weights_only=False)
 
     try:
         ckpt = _load()
@@ -1873,7 +1885,7 @@ def torch_safe_load(weight, safe_only=None):
             f"run a command with an official Ultralytics model, i.e. 'yolo predict model=yolo26n.pt'"
         )
         check_requirements(e.name)  # install missing module
-        ckpt = torch.load(file, map_location="cpu")
+        ckpt = torch.load(file, map_location="cpu", weights_only=False)
 
     if not isinstance(ckpt, dict):
         # File is likely a YOLO instance saved with i.e. torch.save(model, "saved_model.pt")
@@ -1902,7 +1914,7 @@ def load_checkpoint(weight, device=None, inplace=True, fuse=False):
     if str(weight).lower().startswith(REMOTE_FILE_PREFIXES):
         weight = check_file(weight, download_dir=SETTINGS["weights_dir"])
     ckpt, weight = torch_safe_load(weight)  # load ckpt
-    args = {**DEFAULT_CFG_DICT, **(ckpt.get("train_args", {}))}  # combine model and default args, preferring model args
+    cfg = DEFAULT_CFG.model_copy(update=ckpt.get("train_args", {}))  # combine model and default args, preferring model args
     candidate = ckpt.get("ema") or ckpt.get("model")
     if not isinstance(candidate, torch.nn.Module):
         raise TypeError(
@@ -1914,7 +1926,7 @@ def load_checkpoint(weight, device=None, inplace=True, fuse=False):
     model = candidate.float()  # FP32 model
 
     # Model compatibility updates
-    model.args = args  # attach args to model
+    model.cfg = cfg  # attach args to model
     model.pt_path = str(weight)  # attach *.pt file path to model as string (avoids WindowsPath pickle issues)
     model.task = getattr(model, "task", guess_model_task(model))
     if not hasattr(model, "stride"):

@@ -3,15 +3,15 @@
 import json
 from time import time
 
-from ultralytics.hub import HUB_WEB_ROOT, PREFIX, HUBTrainingSession
-from ultralytics.utils import LOGGER, RANK, SETTINGS
-from ultralytics.utils.events import events
+from vision_ai_platform.packages.utils.hub import HUB_WEB_ROOT, PREFIX, HUBTrainingSession
+from vision_ai_platform.packages.utils import LOGGER, RANK, SETTINGS
+from vision_ai_platform.packages.utils.events import events
 
 
 def on_pretrain_routine_start(trainer):
     """Create a remote Ultralytics HUB session to log local model training."""
     if RANK in {-1, 0} and SETTINGS["hub"] is True and SETTINGS["api_key"] and trainer.hub_session is None:
-        trainer.hub_session = HUBTrainingSession.create_session(trainer.args.model, trainer.args)
+        trainer.hub_session = HUBTrainingSession.create_session(trainer.cfg.model, trainer.cfg)
 
 
 def on_pretrain_routine_end(trainer):
@@ -30,7 +30,7 @@ def on_fit_epoch_end(trainer):
             **trainer.metrics,
         }
         if trainer.epoch == 0:
-            from ultralytics.utils.torch_utils import model_info_for_loggers
+            from vision_ai_platform.packages.utils.device_utils import model_info_for_loggers
 
             all_plots = {**all_plots, **model_info_for_loggers(trainer)}
 
@@ -74,24 +74,24 @@ def on_train_end(trainer):
 
 def on_train_start(trainer):
     """Run events on train start."""
-    events(trainer.args, trainer.device)
+    events(trainer.cfg, trainer.device)
 
 
 def on_val_start(validator):
     """Run events on validation start."""
     if not validator.training:
-        events(validator.args, validator.device)
+        events(validator.cfg, validator.device)
 
 
 def on_predict_start(predictor):
     """Run events on predict start."""
     backend = getattr(getattr(predictor, "model", None), "backend", None)
-    events(predictor.args, predictor.device, backend=backend)
+    events(predictor.cfg, predictor.device, backend=backend)
 
 
 def on_export_start(exporter):
     """Run events on export start."""
-    events(exporter.args, exporter.device)
+    events(exporter.cfg, exporter.device)
 
 
 callbacks = (

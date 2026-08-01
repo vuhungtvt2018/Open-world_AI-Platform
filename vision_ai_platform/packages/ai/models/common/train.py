@@ -29,7 +29,7 @@ from vision_ai_platform.packages.utils import (
     emojis,
     clean_url
 )
-from vision_ai_platform.packages.utils.converter import convert_ndjson_to_yolo_if_needed
+from vision_ai_platform.packages.ai.data.utils import convert_ndjson_to_yolo_if_needed
 from vision_ai_platform.packages.utils.device_utils import (
     parse_device,
     select_device,

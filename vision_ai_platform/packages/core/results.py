@@ -794,18 +794,18 @@ class Results:
         """
         self.orig_img = orig_img
         self.orig_shape = orig_img.shape[:2]
-        self.boxes = BoundingBoxes(boxes, self.orig_shape)
-        self.masks = Masks(masks, self.orig_shape)
-        self.keypoints = Keypoints(keypoints, self.orig_shape)
-        self.probs = Probs(probs, self.orig_shape)
-        self.obb = OBB(obb, self.orig_shape)
+        self.boxes = BoundingBoxes(boxes, self.orig_shape) if boxes is not None else None  # native size boxes
+        self.masks = Masks(masks, self.orig_shape) if masks is not None else None  # native size or imgsz masks
+        self.probs = Probs(probs) if probs is not None else None
+        self.keypoints = Keypoints(keypoints, self.orig_shape) if keypoints is not None else None
+        self.obb = OBB(obb, self.orig_shape) if obb is not None else None
         self.semantic_mask = SemanticMask(semantic_mask, self.orig_shape) if semantic_mask is not None else None
         self.depth = DepthMap(depth, self.orig_shape) if depth is not None else None
         self.speed = speed if speed is not None else {"preprocess": None, "inference": None, "postprocess": None}
         self.names = names
         self.path = path
         self.save_dir = None
-        self._keys = "boxes", "masks", "probs", "keypoints", "obb", "semantic_mask", "depth"
+        self._keys = "boxes", "masks", "probs", "keypoints", "obb", "semantic_mask"
 
     def __getitem__(self, idx):
         """Return a Results object for a specific index of inference results.

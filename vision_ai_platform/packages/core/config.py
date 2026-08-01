@@ -1,6 +1,7 @@
-from typing import List, Optional, Tuple, Union, Literal
+from typing import List, Optional, Tuple, Union, Literal, Any
 from pydantic import BaseModel, Field, ConfigDict
-import yaml
+import cv2
+import warnings
 
 
 class BaseConfig(BaseModel):
@@ -141,6 +142,52 @@ class YOLOConfig(BaseConfig):
     plots: bool = Field(default=True, description="Save plots and images during evaluation")
     end2end: Optional[bool] = Field(default=None, description="Use end2end head (e.g. YOLOv10/YOLO26)")
 
+    # Exporter configuration
+    format: Literal[
+        "onnx", "torchscript", "engine", "openvino", "coreml", 
+        "saved_model", "pb", "tflite", "edgetpu", "tfjs", 
+        "paddle", "ncnn", "mnn"
+    ] = Field(
+        default="onnx", 
+        description="Target export format for deployment environment"
+    )
+    keras: bool = Field(default=False, description="TF SavedModel only (format=saved_model); enable Keras layers during export")
+    optimize: bool = Field(default=False, description="DEEPX only; higher compiler optimization (slower compile, faster inference)")
+    quantize: Optional[Union[int, str]] = Field(
+        default=None, 
+        description="Quantization precision: 16 (FP16), 8/'int8' (INT8/PTQ), or None for FP32"
+    )
+    dynamic: bool = Field(
+        default=False, 
+        description="Enable dynamic input shape dimensions for formats like ONNX/TensorRT"
+    )
+    simplify: bool = Field(
+        default=True, 
+        description="Simplify model graph using tools like onnxslim"
+    )
+    opset: Optional[int] = Field(
+        default=None, 
+        description="ONNX opset version (uses latest supported by system if None)"
+    )
+    nms: bool = Field(
+        default=False, 
+        description="Embed Non-Maximum Suppression (NMS) directly into the exported model graph"
+    )
+    fraction: float = Field(
+        default=1.0, 
+        description="Fraction of validation dataset to use for INT8 calibration"
+    )
+    workspace: Optional[float] = Field(
+        default=None, 
+        description="Maximum workspace memory allocation in GiB for TensorRT optimization"
+    )
+
+    # Override configuration
+    cfg: Optional[str] = Field(default=None, description="Path to a config.yaml that overrides defaults")
+
+    # Tracker file
+    tracker: str = Field(default="tracktrack.yaml", description="Tracker config: botsort.yaml, bytetrack.yaml, ocsort.yaml, deepocsort.yaml, fasttrack.yaml, tracktrack.yaml")
+
 
 # ==============================================================================
 # TRACKER CONFIG
@@ -240,6 +287,62 @@ class ExporterConfig(BaseConfig):
         return self.model_dump(exclude_none=True)
 
 
+class WorkflowConfig(BaseConfig):
+    """Configuration class for Vision AI workflows"""
+    source: Optional[str] = Field(default=None, description="Path to input source (video, stream, etc.)")
+    model: Optional[str] = Field(default=None, description="Path to the model weights")
+    classes: Optional[List[int]] = Field(default=None, description="Class indices to filter detections")
+    show_conf: bool = Field(default=True, description="Show confidence scores on visual output")
+    show_labels: bool = Field(default=True, description="Display class labels on visual output")
+    show_boxes: bool = Field(default=True, description="Display bounding boxes on visual output")
+    region: Optional[List[Tuple[int, int]]] = Field(default=None, description="Polygonal region or line coordinates")
+    colormap: Optional[int] = Field(default=cv2.COLORMAP_DEEPGREEN, description="OpenCV colormap constant")
+    show_in: bool = Field(default=True, description="Display count for objects entering region")
+    show_out: bool = Field(default=True, description="Display count for objects leaving region")
+    up_angle: float = Field(default=145.0, description="Upper angle threshold for pose monitoring")
+    down_angle: int = Field(default=90, description="Lower angle threshold for pose monitoring")
+    kpts: List[int] = Field(default_factory=lambda: [6, 8, 10], description="Keypoint indices to monitor")
+    analytics_type: str = Field(default="line", description="Type of analytics chart ('line', 'bar', etc.)")
+    figsize: Optional[Tuple[float, float]] = Field(default=(12.8, 7.2), description="Matplotlib figure size")
+    blur_ratio: float = Field(default=0.5, ge=0.0, le=1.0, description="Blur ratio (0.0 to 1.0)")
+    vision_point: Tuple[int, int] = Field(default=(20, 20), description="Reference point for directional tracking")
+    crop_dir: str = Field(default="cropped-detections", description="Directory to save cropped detections")
+    json_file: Optional[str] = Field(default=None, description="Path to JSON file for parking regions")
+    line_width: int = Field(default=2, ge=1, description="Line width for drawing overlays")
+    records: int = Field(default=5, ge=1, description="Threshold count for alerts")
+    fps: float = Field(default=30.0, gt=0.0, description="Video frame rate for speed calculation")
+    max_hist: int = Field(default=5, ge=1, description="Historical positions retained per track")
+    meter_per_pixel: float = Field(default=0.05, gt=0.0, description="Real-world scale (meters per pixel)")
+    max_speed: int = Field(default=120, gt=0, description="Speed limit threshold")
+    show: bool = Field(default=False, description="Display GUI window during processing")
+    iou: float = Field(default=0.7, ge=0.0, le=1.0, description="IoU threshold for NMS")
+    conf: float = Field(default=0.25, ge=0.0, le=1.0, description="Confidence threshold for predictions")
+    device: Optional[str] = Field(default=None, description="Target device ('cpu', '0', etc.)")
+    max_det: int = Field(default=300, ge=1, description="Maximum detections per frame")
+    quantize: Union[int, str, None] = Field(default=None, description="Quantization precision (e.g. 16 for FP16)")
+    imgsz: int = Field(default=640, gt=0, description="Inference image resolution")
+    tracker: str = Field(default="botsort.yaml", description="Tracking config YAML path")
+    verbose: bool = Field(default=True, description="Enable verbose logging output")
+    data: str = Field(default="images", description="Directory path for similarity search or data")
+
+    def update(self, **kwargs: Any) -> "WorkflowConfig":
+        """Update configuration parameters with new values provided as keyword arguments."""
+        if "half" in kwargs:
+            warnings.warn(
+                "'half' is deprecated, please use 'quantize' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            kwargs["quantize"] = 16 if kwargs.pop("half") else None
+
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise ValueError(f"'{key}' is not a valid argument for {self.__class__.__name__}.")
+
+        return self
+
 class AppConfig(BaseConfig):
     """Master application configuration aggregating sub-configs."""
     project_name: str = Field(default="vision_pipeline", description="Project workspace directory name")
@@ -250,21 +353,3 @@ class AppConfig(BaseConfig):
     model: YOLOConfig = Field(default_factory=YOLOConfig)
     hardware: HardwareConfig = Field(default_factory=HardwareConfig)
     tracker: TrackerConfig = Field(default_factory=TrackerConfig)
-
-
-def get_config_from_yaml(config_file: str, config_type: str):
-    with open(config_file, "r", encoding="utf-8") as f:
-        config_dict = yaml.safe_load(f)
-    if config_type == "model" or config_type == "yolo":
-        return YOLOConfig.model_validate(config_dict)
-    elif config_type == "tracker":
-        return TrackerConfig.model_validate(config_dict)
-    elif config_type == "exporter":
-        return ExporterConfig.model_validate(config_dict)
-    elif config_type == "app":
-        return AppConfig.model_validate(config_dict)
-    else:
-        raise ValueError(
-            "Value of config_type must be in the following list: "
-            "['model', 'yolo', 'tracker', 'exporter', 'app']"
-        )

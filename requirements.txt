@@ -12,7 +12,7 @@ polars
 tqdm
 scipy
 pyyaml
-pynvml
+nvidia-ml-py
 thop
 mss
 pytubefix
@@ -20,3 +20,4 @@ pafy
 yt_dlp
 faster-coco-eval
 pi-heif
+shapely

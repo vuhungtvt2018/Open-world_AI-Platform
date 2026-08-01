@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from abc import ABC, abstractmethod
@@ -11,12 +12,6 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
-from .predictor import BasePredictor
-from .validator import BaseValidator
-from .trainer import BaseTrainer
-from .tracker import BaseTracker
-
-from .config import YOLOConfig, TrackerConfig, get_config_from_yaml
 from .results import Results
 
 class BaseModel(nn.Module, ABC):
@@ -113,7 +108,7 @@ class BaseModel(nn.Module, ABC):
         model = str(model).strip()
 
         # Load or create new YOLO model
-        __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
         if str(model).endswith((".yaml", ".yml")):
             self._new(model, task=task, verbose=verbose)
         else:

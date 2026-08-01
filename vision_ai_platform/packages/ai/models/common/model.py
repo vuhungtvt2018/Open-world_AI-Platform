@@ -12,14 +12,14 @@ from vision_ai_platform.packages.utils import (
     LOGGER,
     RANK,
     callbacks,
+    DEFAULT_CFG,
     DEFAULT_CFG_DICT,
     check,
     SETTINGS,
-    ASSETS,
     YAML,
     TASK2DATA,
 )
-from vision_ai_platform.packages.utils.files import get_save_dir, get_latest_run
+from vision_ai_platform.packages.utils.files import get_save_dir
 from vision_ai_platform.packages.ai.nn.tasks import guess_model_task, yaml_model_load, load_checkpoint
 
 class Model(BaseModel, ABC):
@@ -71,11 +71,11 @@ class Model(BaseModel, ABC):
         self.cfg_path = cfg_path
         self.task = task or guess_model_task(cfg_dict)
         self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1)  # build model
-        self.overrides["model"] = self.cfg
+        self.overrides["model"] = self.cfg_path
         self.overrides["task"] = self.task
 
         # Below added to allow export from YAMLs
-        self.model.args = {**DEFAULT_CFG_DICT, **self.overrides}  # combine default and model args (prefer model args)
+        self.model.cfg = DEFAULT_CFG.model_copy(update=self.overrides)  # combine default and model args (prefer model args)
         self.model.task = self.task
         self.model_name = cfg_path    
 
@@ -259,10 +259,10 @@ class Model(BaseModel, ABC):
                 - augmentations (list[Callable]): List of augmentation functions to apply during training.
 
         Returns:
-            (ultralytics.utils.metrics.DetMetrics | dict | None): Training metrics if available and training is
-                successful; otherwise, None. The specific metrics type depends on the task. When `data` is a list or
-                tuple of datasets, the base model is fine-tuned on each in series and a {dataset: metrics} dict is
-                returned.
+            (vision_ai_platform.packages.utils.metrics.DetMetrics | dict | None): Training metrics if available and 
+                training is successful; otherwise, None. The specific metrics type depends on the task. When `data`
+                is a list or tuple of datasets, the base model is fine-tuned on each in series and a {dataset: metrics}
+                dict is returned.
 
         Examples:
             >>> model = YOLO("yolo26n.pt")
@@ -402,4 +402,24 @@ class Model(BaseModel, ABC):
             return predictor.model.names
         return self.predictor.model.names
 
-    
+    def reset_callbacks(self) -> None:
+        """Reset all callbacks to their default functions.
+
+        This method reinstates the default callback functions for all events, removing any custom callbacks that were
+        previously added. It iterates through all default callback events and replaces the current callbacks with the
+        default ones.
+
+        The default callbacks are defined in the 'callbacks.default_callbacks' dictionary, which contains predefined
+        functions for various events in the model's lifecycle, such as on_train_start, on_epoch_end, etc.
+
+        This method is useful when you want to revert to the original set of callbacks after making custom
+        modifications, ensuring consistent behavior across different runs or experiments.
+
+        Examples:
+            >>> model = YOLO("yolo26n.pt")
+            >>> model.add_callback("on_train_start", custom_function)
+            >>> model.reset_callbacks()
+            # All callbacks are now reset to their default functions
+        """
+        for event in callbacks.default_callbacks.keys():
+            self.callbacks[event] = [callbacks.default_callbacks[event][0]]

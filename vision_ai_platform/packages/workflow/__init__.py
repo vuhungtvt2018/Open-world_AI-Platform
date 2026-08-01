@@ -1,1 +1,2 @@
-from vision_ai_platform.packages.ai import *
+from .annotator import WorkflowAnnotator
+from .base import Workflow

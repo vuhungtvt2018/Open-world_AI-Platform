@@ -7,9 +7,8 @@ from typing import Any
 
 import torch
 
-from vision_ai_platform.packages.core.config import get_config_from_yaml
 from vision_ai_platform.packages.ai.data.dataloader import load_inference_source
-from vision_ai_platform.packages.core.model import BaseModel
+from vision_ai_platform.packages.ai.models.common import Model
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.nn.tasks import (
     ClassificationModel,
@@ -25,7 +24,7 @@ from vision_ai_platform.packages.ai.nn.tasks import (
 from vision_ai_platform.packages.utils import ROOT, YAML
 
 
-class YOLO(BaseModel):
+class YOLO(Model):
     """YOLO (You Only Look Once) object detection model.
 
     This class provides a unified interface for YOLO models, automatically switching to specialized model types
@@ -127,7 +126,7 @@ class YOLO(BaseModel):
         }
 
 
-class YOLOWorld(BaseModel):
+class YOLOWorld(Model):
     """YOLO-World object detection model.
 
     YOLO-World is an open-vocabulary object detection model that can detect objects based on text descriptions without
@@ -198,7 +197,7 @@ class YOLOWorld(BaseModel):
             self.predictor.model.names = classes
 
 
-class YOLOE(BaseModel):
+class YOLOE(Model):
     """YOLOE object detection and segmentation model.
 
     YOLOE is an enhanced YOLO model that supports both object detection and instance segmentation tasks with improved

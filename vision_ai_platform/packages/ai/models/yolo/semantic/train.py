@@ -14,8 +14,8 @@ from vision_ai_platform.packages.ai.data.utils import add_polygon_background
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionTrainer
 from vision_ai_platform.packages.ai.nn.tasks import SemanticSegmentationModel
-from vision_ai_platform.packages.utils import DEFAULT_CFG, LOGGER, RANK
-from vision_ai_platform.packages.utils.plotting import colors, plt_settings
+from vision_ai_platform.packages.utils import DEFAULT_CFG, LOGGER, RANK, plt_settings
+from vision_ai_platform.packages.utils.plotting import colors
 
 
 class SemanticSegmentationTrainer(DetectionTrainer):

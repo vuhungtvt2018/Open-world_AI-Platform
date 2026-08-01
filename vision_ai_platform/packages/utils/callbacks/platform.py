@@ -10,7 +10,7 @@ from math import isfinite
 from pathlib import Path
 from time import sleep, time
 
-from ultralytics.utils import (
+from vision_ai_platform.packages.utils import (
     ENVIRONMENT,
     GIT,
     LOGGER,
@@ -42,8 +42,8 @@ try:
 
     import requests
 
-    from ultralytics.utils.logger import ConsoleLogger, SystemLogger
-    from ultralytics.utils.torch_utils import model_info_for_loggers
+    from vision_ai_platform.packages.utils.logger import ConsoleLogger, SystemLogger
+    from vision_ai_platform.packages.utils.device_utils import model_info_for_loggers
 
     _executor = ThreadPoolExecutor(max_workers=10)  # Bounded thread pool for async operations
 
@@ -236,7 +236,7 @@ def _handle_control_response(trainer, ctx, response):
 
 def _upload_model(model_path, project, name, progress=False, retry=1, model_id=None, run_id=None):
     """Publish a model checkpoint to its configured Platform storage location."""
-    from ultralytics.utils.uploads import safe_upload
+    from vision_ai_platform.packages.utils.uploads import safe_upload
 
     model_path = Path(model_path)
     if not model_path.exists():
@@ -297,8 +297,8 @@ def _get_environment_info():
     import psutil
     import torch
 
-    from ultralytics import __version__
-    from ultralytics.utils.torch_utils import get_cpu_info, get_gpu_info
+    from vision_ai_platform import __version__
+    from vision_ai_platform.packages.utils.device_utils import get_cpu_info, get_gpu_info
 
     # Get RAM and disk totals
     memory = psutil.virtual_memory()

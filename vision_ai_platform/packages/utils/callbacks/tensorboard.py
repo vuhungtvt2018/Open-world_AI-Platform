@@ -1,7 +1,7 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-from ultralytics.utils import LOGGER, SETTINGS, TESTS_RUNNING, colorstr, torch_utils
-from ultralytics.utils.torch_utils import smart_inference_mode
+from vision_ai_platform.packages.utils import LOGGER, SETTINGS, TESTS_RUNNING, colorstr
+from vision_ai_platform.packages.utils.device_utils import smart_inference_mode, unwrap_model
 
 try:
     assert not TESTS_RUNNING  # do not log pytest
@@ -66,13 +66,13 @@ def _log_tensorboard_graph(trainer) -> None:
     # Try simple method first (YOLO)
     try:
         trainer.model.eval()  # place in .eval() mode to avoid BatchNorm statistics changes
-        WRITER.add_graph(torch.jit.trace(torch_utils.unwrap_model(trainer.model), im, strict=False), [])
+        WRITER.add_graph(torch.jit.trace(unwrap_model(trainer.model), im, strict=False), [])
         LOGGER.info(f"{PREFIX}model graph visualization added ✅")
         return
     except Exception as e1:
         # Fallback to TorchScript export steps (RTDETR)
         try:
-            model = deepcopy(torch_utils.unwrap_model(trainer.model))
+            model = deepcopy(unwrap_model(trainer.model))
             model.eval()
             model = model.fuse(verbose=False)
             for m in model.modules():

@@ -1,6 +1,6 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-from ultralytics.utils import LOGGER, SETTINGS, TESTS_RUNNING
+from vision_ai_platform.packages.utils import LOGGER, SETTINGS, TESTS_RUNNING
 
 try:
     assert not TESTS_RUNNING  # do not log pytest
@@ -106,7 +106,7 @@ def on_fit_epoch_end(trainer) -> None:
             title = k.split("/")[0]
             task.get_logger().report_scalar(title, k, v, iteration=trainer.epoch)
         if trainer.epoch == 0:
-            from ultralytics.utils.torch_utils import model_info_for_loggers
+            from vision_ai_platform.packages.utils.device_utils import model_info_for_loggers
 
             for k, v in model_info_for_loggers(trainer).items():
                 task.get_logger().report_single_value(k, v)

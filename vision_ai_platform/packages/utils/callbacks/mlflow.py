@@ -24,7 +24,7 @@ Commands:
 import os
 from pathlib import Path
 
-from ultralytics.utils import LOGGER, RUNS_DIR, SETTINGS, TESTS_RUNNING, colorstr, env_bool
+from vision_ai_platform.packages.utils import LOGGER, RUNS_DIR, SETTINGS, TESTS_RUNNING, colorstr, env_bool
 
 PREFIX = colorstr("MLflow: ")
 
