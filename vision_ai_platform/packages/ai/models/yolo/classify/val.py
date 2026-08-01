@@ -12,7 +12,7 @@ import torch.distributed as dist
 from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import ClassificationDataset, build_dataloader
 from vision_ai_platform.packages.ai.models.common import Validator
-from vision_ai_platform.packages.utils import LOGGER, RANK
+from vision_ai_platform.packages.utils import LOGGER, RANK, plt_settings
 from vision_ai_platform.packages.utils.metrics import ClassifyMetrics, ConfusionMatrix
 from vision_ai_platform.packages.utils.plotting import plot_images
 
@@ -176,6 +176,7 @@ class ClassificationValidator(Validator):
         pf = "%22s" + "%11.3g" * len(self.metrics.keys)  # print format
         LOGGER.info(pf % ("all", self.metrics.top1, self.metrics.top5))
 
+    @plt_settings()
     def plot_val_samples(self, batch: dict[str, Any], ni: int) -> None:
         """Plot validation image samples with their ground truth labels.
 
@@ -196,6 +197,7 @@ class ClassificationValidator(Validator):
             on_plot=self.on_plot,
         )
 
+    @plt_settings()
     def plot_predictions(self, batch: dict[str, Any], preds: torch.Tensor, ni: int) -> None:
         """Plot images with their predicted class labels and save the visualization.
 

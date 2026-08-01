@@ -13,7 +13,7 @@ from vision_ai_platform.packages.ai.data import ClassificationDataset, build_dat
 from vision_ai_platform.packages.ai.models.common import Trainer
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.nn.tasks import ClassificationModel
-from vision_ai_platform.packages.utils import DEFAULT_CFG, LOGGER, RANK
+from vision_ai_platform.packages.utils import DEFAULT_CFG, LOGGER, RANK, plt_settings
 from vision_ai_platform.packages.utils.plotting import plot_images
 from vision_ai_platform.packages.utils.device_utils import is_parallel, torch_distributed_zero_first
 
@@ -53,7 +53,7 @@ class ClassificationTrainer(Trainer):
 
     def __init__(
         self,
-        cfg: YOLOConfig,
+        cfg: YOLOConfig = DEFAULT_CFG,
         save_dir: Optional[str | Path] = None,
         _callbacks: dict | None = None
     ):
@@ -215,6 +215,7 @@ class ClassificationTrainer(Trainer):
         loss_items = [round(float(loss_items), 5)]
         return dict(zip(keys, loss_items))
 
+    @plt_settings()
     def plot_training_samples(self, batch: dict[str, torch.Tensor], ni: int):
         """Plot training samples with their annotations.
 

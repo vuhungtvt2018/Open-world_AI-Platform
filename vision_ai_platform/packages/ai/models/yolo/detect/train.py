@@ -17,7 +17,7 @@ from vision_ai_platform.packages.ai.models.common import Trainer
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.nn.tasks import DetectionModel
 from vision_ai_platform.packages.core import YOLOConfig
-from vision_ai_platform.packages.utils import DEFAULT_CFG, LOGGER, RANK
+from vision_ai_platform.packages.utils import DEFAULT_CFG, LOGGER, RANK, plt_settings
 from vision_ai_platform.packages.utils.plotting import plot_images, plot_labels
 from vision_ai_platform.packages.utils.device_utils import torch_distributed_zero_first, unwrap_model
 
@@ -246,6 +246,7 @@ class DetectionTrainer(Trainer):
             "Size",
         )
 
+    @plt_settings()
     def plot_training_samples(self, batch: dict[str, Any], ni: int) -> None:
         """Plot training samples with their annotations.
 
@@ -260,6 +261,7 @@ class DetectionTrainer(Trainer):
             on_plot=self.on_plot,
         )
 
+    @plt_settings()
     def plot_training_labels(self):
         """Create a labeled training plot of the YOLO model."""
         boxes = np.concatenate([lb["bboxes"] for lb in self.train_loader.dataset.labels], 0)

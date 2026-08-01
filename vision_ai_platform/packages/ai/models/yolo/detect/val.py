@@ -13,14 +13,13 @@ import torch.distributed as dist
 
 from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import build_dataloader, build_yolo_dataset
-from vision_ai_platform.packages.utils import converter
+from vision_ai_platform.packages.utils import converter, plt_settings
 from vision_ai_platform.packages.ai.models.common import Validator
 from vision_ai_platform.packages.utils import LOGGER, RANK, nms, ops
 from vision_ai_platform.packages.utils.check import check_requirements
 from vision_ai_platform.packages.utils.metrics import ConfusionMatrix, DetMetrics
 from vision_ai_platform.packages.utils.loss import box_iou
 from vision_ai_platform.packages.utils.plotting import plot_images
-from vision_ai_platform.packages.utils.save_results import save_txt
 
 class DetectionValidator(Validator):
     """A class extending the BaseValidator class for validation based on a detection model.
@@ -359,6 +358,7 @@ class DetectionValidator(Validator):
             pin_memory=self.training,
         )
 
+    @plt_settings()
     def plot_val_samples(self, batch: dict[str, Any], ni: int) -> None:
         """Plot validation image samples.
 
@@ -374,6 +374,7 @@ class DetectionValidator(Validator):
             on_plot=self.on_plot,
         )
 
+    @plt_settings()
     def plot_predictions(
         self, batch: dict[str, Any], preds: list[dict[str, torch.Tensor]], ni: int, max_det: int | None = None
     ) -> None:
@@ -411,16 +412,14 @@ class DetectionValidator(Validator):
             shape (tuple[int, int]): Shape of the original image (height, width).
             file (Path): File path to save the detections.
         """
-        from vision_ai_platform.packages.core.results import Results
+        from vision_ai_platform.packages.ai.models.common import Results
 
-        results = Results(
+        Results(
             np.zeros((shape[0], shape[1]), dtype=np.uint8),
             path=None,
             names=self.names,
             boxes=torch.cat([predn["bboxes"], predn["conf"].unsqueeze(-1), predn["cls"].unsqueeze(-1)], dim=1),
-        )
-        save_txt(results, file, save_conf=save_conf)
-        del results
+        ).save_txt(file, save_conf=save_conf)
 
     def pred_to_json(self, predn: dict[str, torch.Tensor], pbatch: dict[str, Any]) -> None:
         """Serialize YOLO predictions to COCO json format.

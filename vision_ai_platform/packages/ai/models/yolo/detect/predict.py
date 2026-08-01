@@ -1,7 +1,7 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
 from vision_ai_platform.packages.ai.models.common import Predictor
-from vision_ai_platform.packages.core.results import Results
+from vision_ai_platform.packages.ai.models.common.results import Results
 from vision_ai_platform.packages.utils import nms, ops
 
 

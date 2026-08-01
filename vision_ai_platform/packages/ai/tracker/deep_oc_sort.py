@@ -163,25 +163,25 @@ class DeepOCSORT(OCSORT):
     - ByteTrack-style low-confidence second pass disabled by default
     """
 
-    def __init__(self, args: Any):
+    def __init__(self, cfg: Any):
         """Initialize Deep OC-SORT tracker.
 
         Args:
-            args (Namespace | IterableSimpleNamespace): Parsed tracker config providing the OC-SORT keys plus
+            cfg (TrackerConfig): Parsed tracker config providing the OC-SORT keys plus
                 `gmc_method`, `proximity_thresh`, `appearance_thresh`, `alpha_fixed_emb`, `with_reid`, and `model`.
         """
-        super().__init__(args)
+        super().__init__(cfg)
 
         # GMC for camera motion compensation
-        self.gmc = GMC(method=getattr(args, "gmc_method", "sparseOptFlow"))
+        self.gmc = GMC(method=getattr(cfg, "gmc_method", "sparseOptFlow"))
 
         # Appearance parameters
-        self.proximity_thresh = getattr(args, "proximity_thresh", 0.5)
-        self.appearance_thresh = getattr(args, "appearance_thresh", 0.75)
-        self.alpha_fixed_emb = getattr(args, "alpha_fixed_emb", 0.95)
+        self.proximity_thresh = getattr(cfg, "proximity_thresh", 0.5)
+        self.appearance_thresh = getattr(cfg, "appearance_thresh", 0.75)
+        self.alpha_fixed_emb = getattr(cfg, "alpha_fixed_emb", 0.95)
 
         self.encoder = build_encoder(
-            getattr(args, "with_reid", False), getattr(args, "model", "auto"), getattr(args, "device", None)
+            getattr(cfg, "with_reid", False), getattr(cfg, "model", "auto"), getattr(cfg, "device", None)
         )
 
     def init_track(self, results, img: np.ndarray | None = None) -> list[DeepOCSortTrack]:

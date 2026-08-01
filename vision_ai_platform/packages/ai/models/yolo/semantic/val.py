@@ -17,7 +17,7 @@ from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import SemanticDataset
 from vision_ai_platform.packages.ai.data.utils import add_polygon_background
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionValidator
-from vision_ai_platform.packages.utils import LOGGER, RANK
+from vision_ai_platform.packages.utils import LOGGER, RANK, plt_settings
 from vision_ai_platform.packages.utils.metrics import ConfusionMatrix, SemanticMetrics
 from vision_ai_platform.packages.utils.plotting import plot_images
 
@@ -196,6 +196,7 @@ class SemanticSegmentationValidator(DetectionValidator):
         """Parse the dataset YAML and add background metadata for polygon labels when required."""
         return add_polygon_background(super().get_dataset())
 
+    @plt_settings()
     def plot_predictions(self, batch, preds, ni):
         """Plot predicted semantic masks on input images."""
         plot_images(

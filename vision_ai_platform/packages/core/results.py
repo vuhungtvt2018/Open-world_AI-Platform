@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from functools import cached_property
 from typing import Any
+from abc import ABC, abstractmethod
+from pathlib import Path
 
 import numpy as np
 import torch
 import cv2
+
+from .base import DataExportMixin, SimpleClass
 
 def clip_boxes(boxes, shape):
     """Clip bounding boxes to image boundaries.
@@ -411,12 +415,13 @@ class BoundingBoxes(BaseResultItem):
                 are the coordinates of the center point of the bounding box, width, height are the dimensions of the
                 bounding box and the shape of the returned tensor is (N, 4), where N is the number of boxes.
         """
-        assert self.data.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {self.data.shape}"
-        if isinstance(self.data, torch.Tensor):
-            y = torch.empty_like(self.data)
+        xyxy = self.xyxy
+        assert xyxy.shape[-1] == 4, f"input shape last dimension expected 4 but input shape is {xyxy.shape}"
+        if isinstance(xyxy, torch.Tensor):
+            y = torch.empty_like(xyxy)
         else:
-            y = np.empty_like(self.data)
-        x1, y1, x2, y2 = self.data[..., 0], self.data[..., 1], self.data[..., 2], self.data[..., 3]
+            y = np.empty_like(xyxy)
+        x1, y1, x2, y2 = xyxy[..., 0], xyxy[..., 1], xyxy[..., 2], xyxy[..., 3]
         y[..., 0] = (x1 + x2) / 2  # x center
         y[..., 1] = (y1 + y2) / 2  # y center
         y[..., 2] = x2 - x1  # width
@@ -749,13 +754,55 @@ class OBB(BaseResultItem):
             else np.stack([x.min(1), y.min(1), x.max(1), y.max(1)], -1)
         )
 
-class Results:
+class BaseResults(SimpleClass, DataExportMixin):
     """A class for storing and manipulating inference results.
 
     This class provides comprehensive functionality for handling inference results from various Ultralytics models,
     including detection, instance segmentation, semantic segmentation, classification, pose estimation, and oriented
     bounding box detection. It supports visualization, data export, and various coordinate transformations.
+
+    Attributes:
+        orig_img (np.ndarray): The original image as a numpy array.
+        orig_shape (tuple[int, int]): Original image shape in (height, width) format.
+        boxes (Boxes | None): Detected bounding boxes.
+        masks (Masks | None): Segmentation masks.
+        probs (Probs | None): Classification probabilities.
+        keypoints (Keypoints | None): Detected keypoints.
+        obb (OBB | None): Oriented bounding boxes.
+        semantic_mask (SemanticMask | None): Semantic segmentation class map.
+        depth (DepthMap | None): Per-pixel depth map.
+        speed (dict): Dictionary containing inference speed information.
+        names (dict): Dictionary mapping class indices to class names.
+        path (str): Path to the input image file.
+        save_dir (str | None): Directory to save results.
+
+    Methods:
+        update: Update the Results object with new detection data.
+        cpu: Return a copy of the Results object with all tensors moved to CPU memory.
+        numpy: Convert all tensors in the Results object to numpy arrays.
+        cuda: Move all tensors in the Results object to GPU memory.
+        to: Move all tensors to the specified device and dtype.
+        new: Create a new Results object with the same image, path, names, and speed attributes.
+        plot: Plot detection results on an input BGR image.
+        show: Display the image with annotated inference results.
+        save: Save annotated inference results image to file.
+        verbose: Return a log string for each task in the results.
+        summary: Convert inference results to a summarized dictionary.
+        save_txt: Save detection results to a text file.
+        save_crop: Save cropped detection images to specified directory.
+        to_df: Convert detection results to a Polars DataFrame.
+        to_json: Convert detection results to JSON format.
+        to_csv: Convert detection results to a CSV format.
+
+    Examples:
+        >>> results = model("path/to/image.jpg")
+        >>> result = results[0]  # Get the first result
+        >>> boxes = result.boxes  # Get the boxes for the first result
+        >>> masks = result.masks  # Get the masks for the first result
+        >>> for result in results:
+        ...     result.plot()  # Plot detection results
     """
+
     def __init__(
         self,
         orig_img: np.ndarray,
@@ -805,7 +852,7 @@ class Results:
         self.names = names
         self.path = path
         self.save_dir = None
-        self._keys = "boxes", "masks", "probs", "keypoints", "obb", "semantic_mask"
+        self._keys = "boxes", "masks", "probs", "keypoints", "obb", "semantic_mask", "depth"
 
     def __getitem__(self, idx):
         """Return a Results object for a specific index of inference results.
@@ -823,7 +870,7 @@ class Results:
         """
         return self._apply("__getitem__", idx)
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of results in the Results object.
 
         Returns:
@@ -855,6 +902,22 @@ class Results:
 
         This method allows updating the boxes, masks, keypoints, probabilities, and oriented bounding boxes (OBB) of
         the Results object. It ensures that boxes are clipped to the original image shape.
+
+        Args:
+            boxes (torch.Tensor | None): A tensor of shape (N, 6) containing bounding box coordinates and confidence
+                scores. The format is (x1, y1, x2, y2, conf, class).
+            masks (torch.Tensor | None): A tensor of shape (N, H, W) containing segmentation masks.
+            probs (torch.Tensor | None): A tensor of shape (num_classes,) containing class probabilities.
+            obb (torch.Tensor | None): A tensor of shape (N, 7) or (N, 8) containing oriented bounding box coordinates.
+            keypoints (torch.Tensor | None): A tensor of shape (N, K, 3) containing keypoints, where K=17 for persons.
+            semantic_mask (torch.Tensor | None): A tensor of shape (H, W) containing class IDs for semantic
+                segmentation.
+            depth (torch.Tensor | None): A tensor of shape (H, W) containing per-pixel depth values.
+
+        Examples:
+            >>> results = model("image.jpg")
+            >>> new_boxes = torch.tensor([[100, 100, 200, 200, 0.9, 0]])
+            >>> results[0].update(boxes=new_boxes)
         """
         if boxes is not None:
             self.boxes = BoundingBoxes(clip_boxes(boxes, self.orig_shape), self.orig_shape)
@@ -906,6 +969,11 @@ class Results:
 
         Returns:
             (Results): A new Results object with all tensor attributes on CPU memory.
+
+        Examples:
+            >>> results = model("path/to/image.jpg")  # Perform inference
+            >>> cpu_result = results[0].cpu()  # Move the first result to CPU
+            >>> print(cpu_result.boxes.device)  # Output: cpu
         """
         return self._apply("cpu")
 
@@ -959,13 +1027,121 @@ class Results:
         """
         return self._apply("to", *args, **kwargs)
 
-    def copy(self):
+    @abstractmethod
+    def new(self):
         """Create a new Results object with the same image, path, names, and speed attributes.
 
         Returns:
             (Results): A new Results object with copied attributes from the original instance.
+
+        Examples:
+            >>> results = model("path/to/image.jpg")
+            >>> new_result = results[0].new()
         """
-        return Results(orig_img=self.orig_img, path=self.path, names=self.names, speed=self.speed)
+        raise NotImplementedError()
+
+    @abstractmethod
+    def plot(
+        self,
+        conf: bool = True,
+        line_width: float | None = None,
+        font_size: float | None = None,
+        font: str = "Arial.ttf",
+        pil: bool = False,
+        img: np.ndarray | torch.Tensor | None = None,
+        kpt_radius: int = 5,
+        kpt_line: bool = True,
+        labels: bool = True,
+        boxes: bool = True,
+        masks: bool = True,
+        probs: bool = True,
+        show: bool = False,
+        save: bool = False,
+        filename: str | None = None,
+        color_mode: str = "class",
+        txt_color: tuple[int, int, int] = (255, 255, 255),
+    ) -> np.ndarray:
+        """Plot detection results on an input BGR image.
+
+        Args:
+            conf (bool): Whether to plot detection confidence scores.
+            line_width (float | None): Line width of bounding boxes. If None, scaled to image size.
+            font_size (float | None): Font size for text. If None, scaled to image size.
+            font (str): Font to use for text.
+            pil (bool): Whether to return the image as a PIL Image.
+            img (np.ndarray | torch.Tensor | None): Image to plot on. Tensor images must be contiguous HWC BGR uint8. If
+                None, uses the original image.
+            kpt_radius (int): Radius of drawn keypoints.
+            kpt_line (bool): Whether to draw lines connecting keypoints.
+            labels (bool): Whether to plot labels of bounding boxes.
+            boxes (bool): Whether to plot bounding boxes.
+            masks (bool): Whether to plot masks.
+            probs (bool): Whether to plot classification probabilities.
+            show (bool): Whether to display the annotated image.
+            save (bool): Whether to save the annotated image.
+            filename (str | None): Filename to save image if save is True.
+            color_mode (str): Specify the color mode, e.g., 'instance' or 'class'.
+            txt_color (tuple[int, int, int]): Text color in BGR format for classification output.
+
+        Returns:
+            (np.ndarray | PIL.Image.Image): Annotated image as a NumPy array (BGR) or PIL image (RGB) if `pil=True`.
+
+        Examples:
+            >>> results = model("image.jpg")
+            >>> for result in results:
+            ...     im = result.plot(pil=True)
+            ...     im.show()
+        """
+        raise NotImplementedError()
+
+    def show(self, *args, **kwargs):
+        """Display the image with annotated inference results.
+
+        This method plots the detection results on the original image and displays it. It's a convenient way to
+        visualize the model's predictions directly.
+
+        Args:
+            *args (Any): Variable length argument list to be passed to the `plot()` method.
+            **kwargs (Any): Arbitrary keyword arguments to be passed to the `plot()` method.
+
+        Examples:
+            >>> results = model("path/to/image.jpg")
+            >>> results[0].show()  # Display the first result
+            >>> for result in results:
+            ...     result.show()  # Display all results
+        """
+        self.plot(*args, show=True, **kwargs)
+
+    def save(self, filename: str | None = None, *args, **kwargs) -> str:
+        """Save annotated inference results image to file.
+
+        This method plots the detection results on the original image and saves the annotated image to a file. It
+        utilizes the `plot` method to generate the annotated image and then saves it to the specified filename.
+
+        Args:
+            filename (str | None): The filename to save the annotated image. If None, a default filename is generated
+                based on the original image path.
+            *args (Any): Variable length argument list to be passed to the `plot` method.
+            **kwargs (Any): Arbitrary keyword arguments to be passed to the `plot` method.
+
+        Returns:
+            (str): The filename where the image was saved.
+
+        Examples:
+            >>> results = model("path/to/image.jpg")
+            >>> for result in results:
+            ...     result.save("annotated_image.jpg")
+            >>> # Or with custom plot arguments
+            >>> for result in results:
+            ...     result.save("annotated_image.jpg", conf=False, line_width=2)
+            >>> # Directory will be created automatically if it does not exist
+            >>> result.save("path/to/annotated_image.jpg")
+        """
+        if not filename:
+            filename = f"results_{Path(self.path).name}"
+        Path(filename).absolute().parent.mkdir(parents=True, exist_ok=True)
+        self.plot(*args, save=True, filename=filename, **kwargs)
+        return filename
 
     def verbose(self) -> str:
         """Return a log string for each task in the results, detailing detection and classification outcomes.
@@ -976,6 +1152,18 @@ class Results:
         Returns:
             (str): A formatted string containing a summary of the results. For detection tasks, it includes the number
                 of detections per class. For classification tasks, it includes the top 5 class probabilities.
+
+        Examples:
+            >>> results = model("path/to/image.jpg")
+            >>> for result in results:
+            ...     print(result.verbose())
+            2 persons, 1 car, 3 traffic lights,
+            dog 0.92, cat 0.78, horse 0.64,
+
+        Notes:
+            - If there are no detections, the method returns "(no detections), " for detection tasks.
+            - For classification tasks, it returns the top 5 class probabilities and their corresponding class names.
+            - The returned string is comma-separated and ends with a comma and a space.
         """
         boxes = self.obb if self.obb is not None else self.boxes
         if len(self) == 0:
@@ -992,7 +1180,61 @@ class Results:
         if self.semantic_mask is not None:
             return ""
 
-    def summarize(self, normalize: bool = False, decimals: int = 5) -> list[dict[str, Any]]:
+    @abstractmethod
+    def save_txt(self, txt_file: str | Path, save_conf: bool = False) -> str:
+        """Save detection results to a text file.
+
+        Args:
+            txt_file (str | Path): Path to the output text file.
+            save_conf (bool): Whether to include confidence scores in the output.
+
+        Returns:
+            (str): Path to the saved text file.
+
+        Examples:
+            >>> from ultralytics import YOLO
+            >>> model = YOLO("yolo26n.pt")
+            >>> results = model("path/to/image.jpg")
+            >>> for result in results:
+            ...     result.save_txt("output.txt")
+
+        Notes:
+            - The file will contain one line per detection or classification with the following structure:
+              - For detections: `class x_center y_center width height [confidence] [track_id]`
+              - For classifications: `confidence class_name`
+              - For masks and keypoints, the specific formats will vary accordingly.
+            - The function will create the output directory if it does not exist.
+            - If save_conf is False, the confidence scores will be excluded from the output.
+            - Existing contents of the file will not be overwritten; new results will be appended.
+            - This method does not support Semantic Segmentation tasks.
+        """
+        pass
+
+    @abstractmethod
+    def save_crop(self, save_dir: str | Path, file_name: str | Path = Path("im.jpg")):
+        """Save cropped detection images to specified directory.
+
+        This method saves cropped images of detected objects to a specified directory. Each crop is saved in a
+        subdirectory named after the object's class, with the filename based on the input file_name.
+
+        Args:
+            save_dir (str | Path): Directory path where cropped images will be saved.
+            file_name (str | Path): Base filename for the saved cropped images.
+
+        Examples:
+            >>> results = model("path/to/image.jpg")
+            >>> for result in results:
+            ...     result.save_crop(save_dir="path/to/crops", file_name="detection")
+
+        Notes:
+            - This method does not support Classify, Oriented Bounding Box (OBB), or Semantic Segmentation tasks.
+            - Crops are saved as 'save_dir/class_name/file_name.jpg'.
+            - The method will create necessary subdirectories if they don't exist.
+            - Original image is copied before cropping to avoid modifying the original.
+        """
+        pass
+
+    def summary(self, normalize: bool = False, decimals: int = 5) -> list[dict[str, Any]]:
         """Convert inference results to a summarized dictionary with optional normalization for box coordinates.
 
         This method creates a list of detection dictionaries, each containing information about a single detection or
@@ -1008,6 +1250,12 @@ class Results:
             (list[dict[str, Any]]): A list of dictionaries, each containing summarized information for a single
                 detection or classification result. The structure of each dictionary varies based on the task type
                 (classification or detection) and available information (boxes, masks, keypoints).
+
+        Examples:
+            >>> results = model("image.jpg")
+            >>> for result in results:
+            ...     summary = result.summary()
+            ...     print(summary)
         """
         # Create list of detection dictionaries
         results = []

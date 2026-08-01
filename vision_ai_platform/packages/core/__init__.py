@@ -15,7 +15,7 @@ from .trainer import BaseTrainer
 from .exporter import BaseExporter
 
 from .model import BaseModel
-from .results import Results
+from .results import BaseResults
 
 from .workflow import WorkflowResults, BaseWorkflow
 
@@ -33,7 +33,7 @@ __all__ = [
     "BaseTracker",
     "BaseModel",
     "BaseExporter",
-    "Results",
+    "BaseResults",
     "WorkflowResults",
     "BaseWorkflow",
 ]

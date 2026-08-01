@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 
+from vision_ai_platform.packages.core.base import DataExportMixin, SimpleClass
 from vision_ai_platform.packages.utils import LOGGER, TryExcept
 from vision_ai_platform.packages.utils.loss import batch_probiou, box_iou
 
@@ -21,7 +22,7 @@ def smooth(y: np.ndarray, f: float = 0.05) -> np.ndarray:
     return np.convolve(yp, np.ones(nf) / nf, mode="valid")  # y-smoothed
 
 
-class ConfusionMatrix:
+class ConfusionMatrix(DataExportMixin):
     """A class for calculating and updating a confusion matrix for object detection and classification tasks.
 
     Attributes:
@@ -412,7 +413,7 @@ def ap_per_class(
     return tp, fp, p, r, f1, ap, unique_classes.astype(int), p_curve, r_curve, f1_curve, x, prec_values
 
 
-class Metric:
+class Metric(SimpleClass):
     """Class for computing evaluation metrics.
 
     Attributes:
@@ -617,7 +618,7 @@ class Metric:
         }
 
 
-class DetMetrics:
+class DetMetrics(SimpleClass, DataExportMixin):
     """Utility class for computing detection metrics such as precision, recall, and mean average precision (mAP).
 
     Attributes:
@@ -1090,7 +1091,7 @@ class PoseMetrics(DetMetrics):
         return summary
 
 
-class ClassifyMetrics:
+class ClassifyMetrics(SimpleClass, DataExportMixin):
     """Class for computing classification metrics including top-1 and top-5 accuracy.
 
     Attributes:
@@ -1194,7 +1195,7 @@ class OBBMetrics(DetMetrics):
         DetMetrics.__init__(self, names)
 
 
-class SemanticMetrics:
+class SemanticMetrics(SimpleClass, DataExportMixin):
     """Metrics for semantic segmentation, including mIoU, pixel accuracy, and per-class IoU.
 
     Attributes:
@@ -1384,7 +1385,7 @@ class SemanticMetrics:
         ]
 
 
-class DepthMetrics:
+class DepthMetrics(SimpleClass, DataExportMixin):
     """Monocular depth estimation metrics: delta1-3, abs_rel, rmse, silog.
 
     Per-image sums are computed on-device and accumulated in float64 on CPU, pooled over every valid pixel of the val

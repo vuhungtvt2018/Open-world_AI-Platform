@@ -149,27 +149,27 @@ class FASTTracker(BYTETracker):
 
     track_class = FastSTrack
 
-    def __init__(self, args):
-        """Initialize FastTracker with tunables read from ``args``.
+    def __init__(self, cfg):
+        """Initialize FastTracker with tunables read from ``cfg``.
 
-        Any FastTracker-specific key missing on ``args`` falls back to a sensible default, so
+        Any FastTracker-specific key missing on ``cfg`` falls back to a sensible default, so
         FastTracker can also be driven by a plain ByteTrack config.
 
         Args:
-            args (Namespace | IterableSimpleNamespace): Parsed tracker config. Must provide the BYTETracker keys
+            cfg (TrackerConfig): Parsed tracker config. Must provide the BYTETracker keys
                 (``track_high_thresh``, ``track_low_thresh``, ``new_track_thresh``, ``track_buffer``, ``match_thresh``,
                 ``fuse_score``) and may provide the FastTracker-specific keys described in the class docstring.
         """
-        super().__init__(args)
-        # Occlusion-handling knobs (fall back to sensible defaults if absent on args)
-        self.reset_velocity_offset_occ = int(getattr(args, "reset_velocity_offset_occ", 5))
-        self.reset_pos_offset_occ = int(getattr(args, "reset_pos_offset_occ", 3))
-        self.enlarge_bbox_occ = float(getattr(args, "enlarge_bbox_occ", 1.1))
-        self.dampen_motion_occ = float(getattr(args, "dampen_motion_occ", 0.5))
-        self.active_occ_to_lost_thresh = int(getattr(args, "active_occ_to_lost_thresh", 10))
-        self.init_iou_suppress = float(getattr(args, "init_iou_suppress", 0.7))
-        self.occ_cover_thresh = float(getattr(args, "occ_cover_thresh", 0.7))
-        self.occ_reappear_window = int(getattr(args, "occ_reappear_window", 40))
+        super().__init__(cfg)
+        # Occlusion-handling knobs (fall back to sensible defaults if absent on cfg)
+        self.reset_velocity_offset_occ = int(getattr(cfg, "reset_velocity_offset_occ", 5))
+        self.reset_pos_offset_occ = int(getattr(cfg, "reset_pos_offset_occ", 3))
+        self.enlarge_bbox_occ = float(getattr(cfg, "enlarge_bbox_occ", 1.1))
+        self.dampen_motion_occ = float(getattr(cfg, "dampen_motion_occ", 0.5))
+        self.active_occ_to_lost_thresh = int(getattr(cfg, "active_occ_to_lost_thresh", 10))
+        self.init_iou_suppress = float(getattr(cfg, "init_iou_suppress", 0.7))
+        self.occ_cover_thresh = float(getattr(cfg, "occ_cover_thresh", 0.7))
+        self.occ_reappear_window = int(getattr(cfg, "occ_reappear_window", 40))
         # Cap history to the max rollback we'll need + small slack.
         self._history_len = max(self.reset_velocity_offset_occ, self.reset_pos_offset_occ) + 4
 

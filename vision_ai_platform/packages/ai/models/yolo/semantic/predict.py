@@ -8,8 +8,8 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from vision_ai_platform.packages.ai.models.common import Predictor
-from vision_ai_platform.packages.core import YOLOConfig, Results
+from vision_ai_platform.packages.ai.models.common import Predictor, Results
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.utils import DEFAULT_CFG, ops
 
 

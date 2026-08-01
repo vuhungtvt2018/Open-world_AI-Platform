@@ -12,11 +12,10 @@ import torch.nn.functional as F
 
 from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionValidator
-from vision_ai_platform.packages.utils import LOGGER, ops
+from vision_ai_platform.packages.utils import LOGGER, ops, plt_settings
 from vision_ai_platform.packages.utils.check import check_requirements
 from vision_ai_platform.packages.utils.metrics import SegmentMetrics
 from vision_ai_platform.packages.utils.loss import mask_iou
-from vision_ai_platform.packages.utils.save_results import save_txt
 
 
 class SegmentationValidator(DetectionValidator):
@@ -170,6 +169,7 @@ class SegmentationValidator(DetectionValidator):
         tp.update({"tp_m": tp_m})  # update tp with mask IoU
         return tp
 
+    @plt_settings()
     def plot_predictions(self, batch: dict[str, Any], preds: list[dict[str, torch.Tensor]], ni: int) -> None:
         """Plot batch predictions with masks and bounding boxes.
 
@@ -194,16 +194,15 @@ class SegmentationValidator(DetectionValidator):
             shape (tuple[int, int]): Shape of the original image.
             file (Path): File path to save the detections.
         """
-        from vision_ai_platform.packages.core.results import Results
+        from vision_ai_platform.packages.ai.models.common import Results
 
-        results = Results(
+        Results(
             np.zeros((shape[0], shape[1]), dtype=np.uint8),
             path=None,
             names=self.names,
             boxes=torch.cat([predn["bboxes"], predn["conf"].unsqueeze(-1), predn["cls"].unsqueeze(-1)], dim=1),
             masks=torch.as_tensor(predn["masks"], dtype=torch.uint8),
-        )
-        save_txt(results, file, save_conf=save_conf)
+        ).save_txt(file, save_conf=save_conf)
         del results
 
     def pred_to_json(self, predn: dict[str, torch.Tensor], pbatch: dict[str, Any]) -> None:

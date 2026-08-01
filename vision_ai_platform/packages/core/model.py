@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from PIL import Image
 
-from .results import Results
+from .results import BaseResults
 
 class BaseModel(nn.Module, ABC):
     """A base class for implementing YOLO models, unifying APIs across different model types.
@@ -122,7 +122,7 @@ class BaseModel(nn.Module, ABC):
         source: str | Path | int | Image.Image | list | tuple | np.ndarray | torch.Tensor = None,
         stream: bool = False,
         **kwargs: Any,
-    ) -> Iterator[Results | torch.Tensor] | list[Results] | list[torch.Tensor]:
+    ) -> Iterator[BaseResults | torch.Tensor] | list[BaseResults] | list[torch.Tensor]:
         """Alias for the predict method, enabling the model instance to be callable for predictions.
 
         This method simplifies the process of making predictions by allowing the model instance to be called directly
@@ -366,7 +366,7 @@ class BaseModel(nn.Module, ABC):
         stream: bool = False,
         predictor=None,
         **kwargs: Any,
-    ) -> Iterator[Results | torch.Tensor] | list[Results] | list[torch.Tensor]:
+    ) -> Iterator[BaseResults | torch.Tensor] | list[BaseResults] | list[torch.Tensor]:
         """Perform predictions on the given image source using the YOLO model.
 
         This method facilitates the prediction process, allowing various configurations through keyword arguments. It
@@ -407,7 +407,7 @@ class BaseModel(nn.Module, ABC):
         stream: bool = False,
         persist: bool = False,
         **kwargs: Any,
-    ) -> list[Results]:
+    ) -> list[BaseResults]:
         """Conduct object tracking on the specified input source using the registered trackers.
 
         This method performs object tracking using the model's predictors and optionally registered trackers. It handles

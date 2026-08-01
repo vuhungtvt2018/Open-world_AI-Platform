@@ -2,7 +2,7 @@ import torch
 
 from vision_ai_platform.packages.ai.data.augment import LetterBox
 from vision_ai_platform.packages.ai.models.common import Predictor
-from vision_ai_platform.packages.core.results import Results
+from vision_ai_platform.packages.ai.models.common.results import Results
 from vision_ai_platform.packages.utils import ops
 
 

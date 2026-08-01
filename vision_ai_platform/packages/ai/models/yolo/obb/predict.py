@@ -7,7 +7,8 @@ from pathlib import Path
 
 import torch
 
-from vision_ai_platform.packages.core import Results, YOLOConfig
+from vision_ai_platform.packages.core import YOLOConfig
+from vision_ai_platform.packages.ai.models.common.results import Results
 from vision_ai_platform.packages.ai.models.yolo.detect.predict import DetectionPredictor
 from vision_ai_platform.packages.utils import DEFAULT_CFG, ops
 

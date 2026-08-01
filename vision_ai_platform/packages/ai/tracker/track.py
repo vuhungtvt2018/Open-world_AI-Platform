@@ -39,13 +39,13 @@ def on_predict_start(predictor: object, persist: bool = False) -> None:
         >>> predictor = SomePredictorClass()
         >>> on_predict_start(predictor, persist=True)
     """
-    if predictor.args.task == "classify":
+    if predictor.cfg.task == "classify":
         raise ValueError("❌ Classification doesn't support 'mode=track'")
 
     if hasattr(predictor, "trackers") and persist:
         return
 
-    tracker = check_yaml(predictor.args.tracker)
+    tracker = check_yaml(predictor.cfg.tracker)
     cfg = TrackerConfig(**YAML.load(tracker))
     cfg.device = predictor.device  # run any ReID encoder on the predictor's device
 
@@ -76,7 +76,7 @@ def on_predict_start(predictor: object, persist: bool = False) -> None:
 
     trackers = []
     for _ in range(predictor.dataset.bs):
-        tracker = TRACKER_MAP[cfg.tracker_type](args=cfg)
+        tracker = TRACKER_MAP[cfg.tracker_type](cfg=cfg)
         trackers.append(tracker)
         if predictor.dataset.mode != "stream":  # non-stream modes reuse a single tracker
             break
@@ -100,7 +100,7 @@ def on_predict_postprocess_end(predictor: object, persist: bool = False) -> None
         >>> predictor = YourPredictorClass()
         >>> on_predict_postprocess_end(predictor, persist=True)
     """
-    is_obb = predictor.args.task == "obb"
+    is_obb = predictor.cfg.task == "obb"
     is_stream = predictor.dataset.mode == "stream"
 
     tracker_cls = type(predictor.trackers[0])

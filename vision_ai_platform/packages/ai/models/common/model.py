@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from vision_ai_platform.packages.core import BaseModel, YOLOConfig, ExporterConfig
-from vision_ai_platform.packages.core.results import Results
+from vision_ai_platform.packages.ai.models.common.results import Results
 from vision_ai_platform.packages.utils import (
     LOGGER,
     RANK,

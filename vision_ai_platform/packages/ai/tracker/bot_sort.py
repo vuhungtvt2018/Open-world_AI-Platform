@@ -139,7 +139,7 @@ class BOTSORT(BYTETracker):
         appearance_thresh (float): Threshold for appearance similarity (ReID embeddings) between tracks and detections.
         encoder (Any): Object to handle ReID embeddings, set to None if ReID is not enabled.
         gmc (GMC): An instance of the GMC algorithm for data association.
-        args (Any): Parsed command-line arguments containing tracking parameters.
+        cfg (Any): Parsed command-line arguments containing tracking parameters.
 
     Methods:
         get_kalmanfilter: Return an instance of KalmanFilterXYWH for object tracking.
@@ -150,27 +150,27 @@ class BOTSORT(BYTETracker):
 
     Examples:
         Initialize BOTSORT and process detections
-        >>> bot_sort = BOTSORT(args)
+        >>> bot_sort = BOTSORT(cfg)
         >>> bot_sort.init_track(results, img)
         >>> bot_sort.multi_predict(tracks)
 
     Notes:
-        The class is designed to work with a YOLO object detection model and supports ReID only if enabled via args.
+        The class is designed to work with a YOLO object detection model and supports ReID only if enabled via cfg.
     """
 
-    def __init__(self, args: Any):
+    def __init__(self, cfg: Any):
         """Initialize BOTSORT object with ReID module and GMC algorithm.
 
         Args:
-            args (Any): Parsed command-line arguments containing tracking parameters.
+            cfg (Any): Parsed command-line arguments containing tracking parameters.
         """
-        super().__init__(args)
-        self.gmc = GMC(method=args.gmc_method)
+        super().__init__(cfg)
+        self.gmc = GMC(method=cfg.gmc_method)
 
         # ReID module
-        self.proximity_thresh = args.proximity_thresh
-        self.appearance_thresh = args.appearance_thresh
-        self.encoder = build_encoder(args.with_reid, args.model, getattr(args, "device", None))
+        self.proximity_thresh = cfg.proximity_thresh
+        self.appearance_thresh = cfg.appearance_thresh
+        self.encoder = build_encoder(cfg.with_reid, cfg.model, getattr(cfg, "device", None))
 
     def get_kalmanfilter(self) -> KalmanFilterXYWH:
         """Return an instance of KalmanFilterXYWH for predicting and updating object states in the tracking process."""

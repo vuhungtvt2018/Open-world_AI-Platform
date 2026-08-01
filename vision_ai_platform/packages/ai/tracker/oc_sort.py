@@ -180,17 +180,17 @@ class OCSORT(BYTETracker):
 
     track_class = OCSortTrack
 
-    def __init__(self, args: Any):
+    def __init__(self, cfg: Any):
         """Initialize OC-SORT tracker.
 
         Args:
-            args (Namespace | IterableSimpleNamespace): Parsed tracker config providing the BYTE keys plus `delta_t`,
+            cfg (TrackerConfig): Parsed tracker config providing the BYTE keys plus `delta_t`,
                 `inertia`, and `use_byte`.
         """
-        super().__init__(args)
-        self.delta_t = getattr(args, "delta_t", 3)
-        self.inertia = getattr(args, "inertia", 0.2)
-        self.use_byte = getattr(args, "use_byte", False)
+        super().__init__(cfg)
+        self.delta_t = getattr(cfg, "delta_t", 3)
+        self.inertia = getattr(cfg, "inertia", 0.2)
+        self.use_byte = getattr(cfg, "use_byte", False)
 
     def init_track(self, results, img: np.ndarray | None = None) -> list[OCSortTrack]:
         """Build `OCSortTrack` instances from a `Results`-like object."""

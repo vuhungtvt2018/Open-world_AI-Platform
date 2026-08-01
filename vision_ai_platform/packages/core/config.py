@@ -194,17 +194,153 @@ class YOLOConfig(BaseConfig):
 # ==============================================================================
 class TrackerConfig(BaseConfig):
     """Configuration settings for object tracking algorithms."""
+
+    # Core Parameters (common across most trackers)
     tracker_type: str = Field(
-        default="tracktrack.yaml",
-        alias="tracker",
-        description="Tracker config file (e.g. botsort.yaml, bytetrack.yaml, tracktrack.yaml)"
+        default="tracktrack",
+        description="Tracker backend: botsort|bytetrack|deepocsort|fasttrack|ocsort|tracktrack"
     )
-    track_high_thresh: float = Field(default=0.5, description="High confidence threshold for tracking")
-    track_low_thresh: float = Field(default=0.1, description="Low confidence threshold for tracking")
-    new_track_thresh: float = Field(default=0.6, description="Threshold for creating new tracks")
-    match_thresh: float = Field(default=0.8, description="Matching threshold for association")
-    track_buffer: int = Field(default=30, description="Frames to keep lost tracks active")
-    fuse_score: bool = Field(default=False, description="Fuse classification score with IoU distance")
+    track_high_thresh: float = Field(
+        default=0.25,
+        description="First-stage/high-confidence match threshold"
+    )
+    track_low_thresh: float = Field(
+        default=0.1,
+        description="Second-stage threshold for low-score matches"
+    )
+    new_track_thresh: float = Field(
+        default=0.25,
+        description="Threshold/minimum score to start a new track"
+    )
+    match_thresh: float = Field(
+        default=0.8,
+        description="Association similarity threshold (IoU/cost)"
+    )
+    track_buffer: int = Field(
+        default=30,
+        description="Frames to keep lost tracks active"
+    )
+    fuse_score: bool = Field(
+        default=False,
+        description="Fuse detection score with motion/IoU for matching"
+    )
+
+    # ReID & Global Motion Compensation (GMC)
+    gmc_method: str = Field(
+        default="sparseOptFlow",
+        description="Global motion compensation method: sparseOptFlow|orb|sift|ecc|none"
+    )
+    with_reid: bool = Field(
+        default=False,
+        description="Enable ReID model usage for feature matching"
+    )
+    model: str = Field(
+        default="auto",
+        description="ReID model path or name ('auto' uses detector features)"
+    )
+    proximity_thresh: float = Field(
+        default=0.5,
+        description="Min IoU to consider tracks proximate for ReID"
+    )
+    appearance_thresh: float = Field(
+        default=0.8,
+        description="Min appearance similarity threshold for ReID"
+    )
+
+    # OC-SORT & Deep OC-SORT Specifics
+    delta_t: int = Field(
+        default=3,
+        description="Temporal window for velocity direction computation in OCM"
+    )
+    inertia: float = Field(
+        default=0.2,
+        description="Weight of velocity consistency cost in association"
+    )
+    use_byte: bool = Field(
+        default=False,
+        description="Enable ByteTrack-style low-confidence second association pass"
+    )
+    alpha_fixed_emb: float = Field(
+        default=0.95,
+        description="Base EMA factor for track embedding updates in Deep OC-SORT"
+    )
+
+    # FastTracker Specifics
+    reset_velocity_offset_occ: int = Field(
+        default=5,
+        description="History frames back to restore KF velocity on occlusion onset"
+    )
+    reset_pos_offset_occ: int = Field(
+        default=3,
+        description="History frames back to restore KF position on occlusion onset"
+    )
+    enlarge_bbox_occ: float = Field(
+        default=1.1,
+        description="One-shot bbox height scale while occluded"
+    )
+    dampen_motion_occ: float = Field(
+        default=0.5,
+        description="Velocity dampening factor applied while occluded (0-1)"
+    )
+    active_occ_to_lost_thresh: int = Field(
+        default=10,
+        description="Max consecutive occluded frames before marking lost"
+    )
+    occ_cover_thresh: float = Field(
+        default=0.7,
+        description="Fraction of track's area covered by another to declare occlusion"
+    )
+    occ_reappear_window: int = Field(
+        default=40,
+        description="Frames a recently-occluded lost track stays re-findable"
+    )
+    init_iou_suppress: float = Field(
+        default=0.7,
+        description="Suppress new-track init if IoU with any active track >= threshold"
+    )
+
+    # TrackTrack Specifics
+    lost_match_thr: float = Field(
+        default=0.0,
+        description="Looser rebind cost gate for still-lost tracks (0 disables)"
+    )
+    iou_weight: float = Field(
+        default=0.5,
+        description="Weight for HMIoU distance in cost matrix"
+    )
+    reid_weight: float = Field(
+        default=0.5,
+        description="Weight for cosine distance in cost matrix"
+    )
+    conf_weight: float = Field(
+        default=0.1,
+        description="Weight for confidence distance in cost matrix"
+    )
+    angle_weight: float = Field(
+        default=0.05,
+        description="Weight for corner angle distance in cost matrix"
+    )
+    penalty_p: float = Field(
+        default=0.2,
+        description="Cost penalty for low-confidence detections in iterative assignment"
+    )
+    penalty_q: float = Field(
+        default=0.4,
+        description="Cost penalty for deleted/recovered detections in iterative assignment"
+    )
+    reduce_step: float = Field(
+        default=0.05,
+        description="Threshold reduction step per iteration"
+    )
+    tai_thr: float = Field(
+        default=0.55,
+        description="IoU threshold for Track-Aware Initialization (TAI) NMS suppression"
+    )
+    min_track_len: int = Field(
+        default=3,
+        description="Minimum history length before track is confirmed"
+    )
+    device: Optional[Union[int, str, List[Union[int, str]]]] = Field(default=None, description="CUDA/CPU/MPS device specification")
 
 
 class HardwareConfig(BaseConfig):

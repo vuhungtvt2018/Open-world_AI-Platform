@@ -142,42 +142,40 @@ class BasePredictor(ABC):
 
     def write_results(self, i: int, p: Path, im: torch.Tensor, s: List[str]) -> str:
         """Write bounding box metadata / visual outputs to file."""
-        string = ""
+        string = ""  # print string
         if len(im.shape) == 3:
-            im = im[None]
-
-        if self.source_type.stream or self.source_type.from_img or self.source_type.tensor:
+            im = im[None]  # expand for batch dim
+        if self.source_type.stream or self.source_type.from_img or self.source_type.tensor:  # batch_size >= 1
             string += f"{i}: "
             frame = self.dataset.count
         else:
             match = re.search(r"frame (\d+)/", s[i])
-            frame = int(match[1]) if match else None
+            frame = int(match[1]) if match else None  # None if frame undetermined
 
         self.txt_path = self.save_dir / "labels" / (p.stem + ("" if self.dataset.mode == "image" else f"_{frame}"))
         string += "{:g}x{:g} ".format(*im.shape[2:])
         result = self.results[i]
-        result.save_dir = str(self.save_dir)
+        result.save_dir = self.save_dir.__str__()  # used in other locations
         string += f"{result.verbose()}{result.speed['inference']:.1f}ms"
 
-        # Plot output image
-        if getattr(self.cfg, "save", False) or self.cfg.show:
+        # Add predictions to image
+        if self.cfg.save or self.cfg.show:
             self.plotted_img = result.plot(
                 line_width=self.cfg.line_width,
                 boxes=self.cfg.show_boxes,
                 conf=self.cfg.show_conf,
                 labels=self.cfg.show_labels,
-                im_gpu=None if self.cfg.retina_masks else im[i],
             )
 
-        # Save to disk options
+        # Save results
         if self.cfg.save_txt:
-            result.save_txt(f"{self.txt_path}.txt", save_conf=self.cfg.save_conf)
+            result.save_txt(f"{self.txt_path}.txt", save_conf=self.args.save_conf)
         if self.cfg.save_crop:
             result.save_crop(save_dir=self.save_dir / "crops", file_name=self.txt_path.stem)
         if self.cfg.show:
             self.show(str(p))
-        if getattr(self.cfg, "save", False):
-            self.save_predicted_images(self.save_dir / p.name, frame or 0)
+        if self.cfg.save:
+            self.save_predicted_images(self.save_dir / p.name, frame)
 
         return string
 

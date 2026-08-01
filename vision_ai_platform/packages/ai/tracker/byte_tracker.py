@@ -221,7 +221,7 @@ class BYTETracker(BaseTracker):
         """Initialize a BYTETracker instance for object tracking.
 
         Args:
-            cfg (TrackerConfig / Namespace): Configuration containing tracking parameters.
+            cfg (TrackerConfig): Configuration containing tracking parameters.
         """
         super().__init__(cfg)
         self.cfg = cfg  # Retain self.cfg reference if required by internal methods

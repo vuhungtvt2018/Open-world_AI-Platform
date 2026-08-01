@@ -164,7 +164,7 @@ def compute_dets_del(predictor) -> list | None:
         raw, predictor._postprocess_im, predictor._postprocess_im0s, iou=_LOOSE_NMS_IOU
     )
 
-    is_obb = predictor.args.task == "obb"
+    is_obb = predictor.cfg.task == "obb"
     out = []
     for loose, tight in zip(loose_results, predictor.results):
         tight_boxes = tight.obb if is_obb else tight.boxes
@@ -343,7 +343,7 @@ class TRACKTRACK:
         tracked_stracks (list[TTSTrack]): Currently tracked tracks.
         lost_stracks (list[TTSTrack]): Tracks that lost their detection but remain within the buffer window.
         frame_id (int): Current frame index.
-        args (Any): Parsed tracker configuration.
+        cfg (Any): Parsed tracker configuration.
         max_time_lost (int): Frame budget before a lost track is removed (scaled to source frame rate).
         kalman_filter (KalmanFilterXYWH): Kalman filter for new-track initialization.
         match_thr (float): Cost gate for the main iterative assignment.
@@ -357,44 +357,44 @@ class TRACKTRACK:
 
     Examples:
         Initialize and run on a single frame
-        >>> tracker = TRACKTRACK(args)
+        >>> tracker = TRACKTRACK(cfg)
         >>> tracked_objects = tracker.update(yolo_results, img=image)
     """
 
-    def __init__(self, args):
+    def __init__(self, cfg):
         """Initialize TRACKTRACK from a tracker config (see `ultralytics/cfg/trackers/tracktrack.yaml`).
 
         Args:
-            args (Any): Parsed tracker configuration. All knobs are read with `getattr(..., default)` so legacy YAMLs
+            cfg (Any): Parsed tracker configuration. All knobs are read with `getattr(..., default)` so legacy YAMLs
                 missing recently added keys still load.
         """
         self.tracked_stracks: list[TTSTrack] = []
         self.lost_stracks: list[TTSTrack] = []
         self.removed_stracks: list[TTSTrack] = []
         self.frame_id = 0
-        self.cfg = args
-        self.max_time_lost = args.track_buffer
+        self.cfg = cfg
+        self.max_time_lost = cfg.track_buffer
         self.kalman_filter = KalmanFilterXYWH()
 
-        self.match_thr = getattr(args, "match_thresh", 0.7)
-        self.lost_match_thr = getattr(args, "lost_match_thr", 0.0)
-        self.penalty_p = getattr(args, "penalty_p", 0.2)
-        self.penalty_q = getattr(args, "penalty_q", 0.4)
-        self.reduce_step = getattr(args, "reduce_step", 0.05)
-        self.iou_weight = getattr(args, "iou_weight", 0.5)
-        self.reid_weight = getattr(args, "reid_weight", 0.5)
-        self.conf_weight = getattr(args, "conf_weight", 0.1)
-        self.angle_weight = getattr(args, "angle_weight", 0.05)
-        self.tai_thr = getattr(args, "tai_thr", 0.55)
-        self.new_track_thresh = getattr(args, "new_track_thresh", 0.7)
-        self.min_track_len = getattr(args, "min_track_len", 3)
+        self.match_thr = getattr(cfg, "match_thresh", 0.7)
+        self.lost_match_thr = getattr(cfg, "lost_match_thr", 0.0)
+        self.penalty_p = getattr(cfg, "penalty_p", 0.2)
+        self.penalty_q = getattr(cfg, "penalty_q", 0.4)
+        self.reduce_step = getattr(cfg, "reduce_step", 0.05)
+        self.iou_weight = getattr(cfg, "iou_weight", 0.5)
+        self.reid_weight = getattr(cfg, "reid_weight", 0.5)
+        self.conf_weight = getattr(cfg, "conf_weight", 0.1)
+        self.angle_weight = getattr(cfg, "angle_weight", 0.05)
+        self.tai_thr = getattr(cfg, "tai_thr", 0.55)
+        self.new_track_thresh = getattr(cfg, "new_track_thresh", 0.7)
+        self.min_track_len = getattr(cfg, "min_track_len", 3)
 
-        self.gmc = GMC(method=getattr(args, "gmc_method", "sparseOptFlow"))
+        self.gmc = GMC(method=getattr(cfg, "gmc_method", "sparseOptFlow"))
 
         from .utils.reid import build_encoder
 
         self.encoder = build_encoder(
-            getattr(args, "with_reid", False), getattr(args, "model", "auto"), getattr(args, "device", None)
+            getattr(cfg, "with_reid", False), getattr(cfg, "model", "auto"), getattr(cfg, "device", None)
         )
 
     @classmethod
@@ -405,7 +405,7 @@ class TRACKTRACK:
         tasks they cannot carry mask/keypoint data and would mis-index downstream; skip recovery (and its
         per-frame overhead) for those tasks.
         """
-        if predictor.args.task in {"detect", "obb"}:
+        if predictor.cfg.task in {"detect", "obb"}:
             attach_raw_preds_hook(predictor)
 
     @classmethod

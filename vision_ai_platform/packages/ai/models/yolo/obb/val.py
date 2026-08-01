@@ -11,12 +11,11 @@ from torch.utils.data import DataLoader
 
 from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionValidator
-from vision_ai_platform.packages.utils import LOGGER, ops
+from vision_ai_platform.packages.utils import LOGGER, ops, plt_settings
 from vision_ai_platform.packages.utils.metrics import OBBMetrics
 from vision_ai_platform.packages.utils.loss import batch_probiou
 from vision_ai_platform.packages.utils.nms import TorchNMS
 from vision_ai_platform.packages.utils.plotting import plot_images
-from vision_ai_platform.packages.utils.save_results import save_txt
 
 
 class OBBValidator(DetectionValidator):
@@ -151,6 +150,7 @@ class OBBValidator(DetectionValidator):
             "im_file": batch["im_file"][si],
         }
 
+    @plt_settings()
     def plot_predictions(self, batch: dict[str, Any], preds: list[dict[str, torch.Tensor]], ni: int) -> None:
         """Plot predicted bounding boxes on input images and save the result.
 
@@ -231,16 +231,14 @@ class OBBValidator(DetectionValidator):
         """
         import numpy as np
 
-        from vision_ai_platform.packages.core.results import Results
+        from vision_ai_platform.packages.ai.models.common import Results
 
-        results = Results(
+        Results(
             np.zeros((shape[0], shape[1]), dtype=np.uint8),
             path=None,
             names=self.names,
             obb=torch.cat([predn["bboxes"], predn["conf"].unsqueeze(-1), predn["cls"].unsqueeze(-1)], dim=1),
-        )
-        save_txt(results, file, save_conf=save_conf)
-        del results
+        ).save_txt(file, save_conf=save_conf)
 
     def scale_preds(self, predn: dict[str, torch.Tensor], pbatch: dict[str, Any]) -> dict[str, torch.Tensor]:
         """Scales predictions to the original image size."""
