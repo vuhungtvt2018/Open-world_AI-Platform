@@ -9,7 +9,7 @@ References:
     https://arxiv.org/pdf/2304.08069.pdf
 """
 
-from vision_ai_platform.packages.core.model import BaseModel
+from vision_ai_platform.packages.ai.models.common import Model
 from vision_ai_platform.packages.ai.nn.tasks import RTDETRDetectionModel
 from vision_ai_platform.packages.utils.device_utils import TORCH_1_11
 
@@ -18,7 +18,7 @@ from .train import RTDETRTrainer
 from .val import RTDETRValidator
 
 
-class RTDETR(BaseModel):
+class RTDETR(Model):
     """Interface for Baidu's RT-DETR model, a Vision Transformer-based real-time object detector.
 
     This model provides real-time performance with high accuracy. It supports efficient hybrid encoding, IoU-aware query

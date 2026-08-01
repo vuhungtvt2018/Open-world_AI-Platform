@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionValidator
 from vision_ai_platform.packages.utils import LOGGER, ops
 from vision_ai_platform.packages.utils.check import check_requirements
@@ -25,27 +27,27 @@ class SegmentationValidator(DetectionValidator):
 
     Attributes:
         process (callable): Function to process masks based on save_json and save_txt flags.
-        args (SimpleNamespace): Arguments for the validator.
+        cfg (YOLOConfig): Configuration for the validator.
         metrics (SegmentMetrics): Metrics calculator for segmentation tasks.
         stats (dict): Dictionary to store statistics during validation.
-
-    Examples:
-        >>> from ultralytics.models.yolo.segment import SegmentationValidator
-        >>> args = dict(model="yolo26n-seg.pt", data="coco8-seg.yaml")
-        >>> validator = SegmentationValidator(args=args)
-        >>> validator()
     """
 
-    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks: dict | None = None) -> None:
+    def __init__(
+        self,
+        cfg: YOLOConfig,
+        dataloader: Optional[DataLoader] = None,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize SegmentationValidator and set task to 'segment', metrics to SegmentMetrics.
 
         Args:
+            cfg (YOLOConfig): Configuration for the validator.
             dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
-            save_dir (Path, optional): Directory to save results.
-            args (dict, optional): Arguments for the validator.
+            save_dir (str | Path, optional): Directory to save results.
             _callbacks (dict, optional): Dictionary of callback functions.
         """
-        super().__init__(dataloader, save_dir, args, _callbacks)
+        super().__init__(cfg, dataloader, save_dir, _callbacks)
         self.process = None
         self.cfg.task = "segment"
         self.metrics = SegmentMetrics()

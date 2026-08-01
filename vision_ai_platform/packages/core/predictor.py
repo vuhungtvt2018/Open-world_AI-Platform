@@ -15,20 +15,49 @@ import torch.nn as nn
 from .config import YOLOConfig
 
 class BasePredictor(ABC):
-    """Base class for making inference predictions on various sources.
+    """A base class for creating predictors.
 
-    Handles pre-processing, model forward pass, and post-processing (e.g. NMS).
+    This class provides the foundation for prediction functionality, handling model setup, inference, and result
+    processing across various input sources.
 
     Attributes:
-        cfg (YOLOConfig): Inference settings.
-        model (nn.Module): PyTorch model used for evaluation.
-        device (torch.device): Device on which model inference is run.
+        cfg (YOLOConfig): Configuration for the predictor.
+        save_dir (Path): Directory to save results.
+        done_warmup (bool): Whether the predictor has finished setup.
+        model (torch.nn.Module): Model used for prediction.
+        data (str): Data configuration.
+        device (torch.device): Device used for prediction.
+        dataset (Dataset): Dataset used for prediction.
+        vid_writer (dict[Path, cv2.VideoWriter]): Dictionary of {save_path: video_writer} for saving video output.
+        plotted_img (np.ndarray): Last plotted image.
+        source_type (SimpleNamespace): Type of input source.
+        seen (int): Number of images processed.
+        windows (list[str]): List of window names for visualization.
+        batch (tuple): Current batch data.
+        results (list[Any]): Current batch results.
+        transforms (Callable): Image transforms for classification.
+        callbacks (dict[str, list[Callable]]): Callback functions for different events.
+        txt_path (Path): Path to save text results.
+        _lock (threading.Lock): Lock for thread-safe inference.
+
+    Methods:
+        preprocess: Prepare input image before inference.
+        inference: Run inference on a given image.
+        postprocess: Process raw predictions into structured results.
+        setup_source: Set up input source and inference mode.
+        stream_inference: Stream inference on input source.
+        setup_model: Initialize and configure the model.
+        write_results: Write inference results to files.
+        save_predicted_images: Save prediction visualizations.
+        show: Display results in a window.
+        run_callbacks: Execute registered callbacks for an event.
+        add_callback: Register a new callback function.
     """
 
     def __init__(
         self,
         cfg: YOLOConfig,
-        save_dir: str | Path,
+        save_dir: Optional[str | Path] = None,
         _callbacks: Optional[Dict[str, List[Callable]]] = None,
     ):
         """Initialize the custom predictor with PredictorConfig.
@@ -44,7 +73,7 @@ class BasePredictor(ABC):
         if self.cfg.conf is None:
             self.cfg.conf = 0.25
 
-        self.save_dir = Path(save_dir)
+        self.save_dir = Path(save_dir) if save_dir else None
         self.done_warmup = False
 
         # Model and Runtime state attributes

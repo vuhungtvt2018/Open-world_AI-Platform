@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import itertools
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import torch
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import build_yolo_dataset
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionTrainer
 from vision_ai_platform.packages.ai.nn.tasks import WorldModel
@@ -34,7 +35,7 @@ class WorldTrainer(DetectionTrainer):
             training.
         model (WorldModel): The YOLO World model being trained.
         data (dict[str, Any]): Dataset configuration containing class information.
-        args (Any): Training arguments and configuration.
+        cfg (Any): Training configuration.
 
     Methods:
         get_model: Return WorldModel initialized with specified config and weights.
@@ -51,18 +52,21 @@ class WorldTrainer(DetectionTrainer):
         >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict[str, Any] | None = None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize a WorldTrainer object with given arguments.
 
         Args:
             cfg (dict[str, Any]): Configuration for the trainer.
-            overrides (dict[str, Any], optional): Configuration overrides.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Dictionary of callback functions.
         """
-        if overrides is None:
-            overrides = {}
-        assert not overrides.get("compile"), f"Training with 'model={overrides['model']}' requires 'compile=False'"
-        super().__init__(cfg, overrides, _callbacks)
+        assert not cfg.compile, f"Training with 'model={cfg.model}' requires 'compile=False'"
+        super().__init__(cfg, save_dir, _callbacks)
         self.text_embeddings = None
 
     def get_model(self, cfg=None, weights: str | None = None, verbose: bool = True) -> WorldModel:

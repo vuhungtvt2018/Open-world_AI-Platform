@@ -160,6 +160,42 @@ HELP_MSG = """
     GitHub: https://github.com/ultralytics/ultralytics
     """
 
+# Task config
+MODES = frozenset({"train", "val", "predict", "export", "track", "benchmark"})
+TASKS = frozenset({"detect", "segment", "classify", "pose", "obb", "semantic"})
+TASK2DATA = {
+    "detect": "coco8.yaml",
+    "segment": "coco8-seg.yaml",
+    "classify": "imagenet10",
+    "pose": "coco8-pose.yaml",
+    "obb": "dota8.yaml",
+    "semantic": "cityscapes8.yaml",
+}
+TASK2CALIBRATIONDATA = {
+    "detect": "coco128.yaml",
+    "segment": "coco128-seg.yaml",
+    "classify": "imagenet100",
+    "pose": "coco8-pose.yaml",
+    "obb": "dota128.yaml",
+    "semantic": "cityscapes8.yaml",
+}
+TASK2MODEL = {
+    "detect": "yolo26n.pt",
+    "segment": "yolo26n-seg.pt",
+    "classify": "yolo26n-cls.pt",
+    "pose": "yolo26n-pose.pt",
+    "obb": "yolo26n-obb.pt",
+    "semantic": "yolo26n-sem.pt",
+}
+TASK2METRIC = {
+    "detect": "metrics/mAP50-95(B)",
+    "segment": "metrics/mAP50-95(M)",
+    "classify": "metrics/accuracy_top1",
+    "pose": "metrics/mAP50-95(P)",
+    "obb": "metrics/mAP50-95(B)",
+    "semantic": "metrics/mIoU",
+}
+
 # Settings and Environment Variables
 torch.set_printoptions(linewidth=320, precision=4, profile="default")
 np.set_printoptions(linewidth=320, formatter=dict(float_kind="{:11.5g}".format))  # format short g, %precision=5

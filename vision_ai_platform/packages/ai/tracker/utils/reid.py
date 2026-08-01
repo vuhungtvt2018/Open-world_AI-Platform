@@ -39,24 +39,33 @@ class ReID:
         self.device = (
             torch.device(device) if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         )
+        self.is_pt = str(model).endswith(".pt")
 
-        from pathlib import Path
+        if self.is_pt:
+            from vision_ai_platform import YOLO
 
-        if Path(str(model)).name in REID_ASSETS:
-            from vision_ai_platform.packages.utils.downloads import attempt_download_asset
+            self.model = YOLO(model)
+            # Initialize predictor with embed=[idx] so subsequent calls return embeddings.
+            self.model(embed=[len(self.model.model.model) - 2], device=self.device, verbose=False, save=False)
+            self.fp16 = False
+        else:
+            from pathlib import Path
 
-            model = attempt_download_asset(str(model))
-        self.model = AutoBackend(str(model), device=self.device, fp16=fp16, verbose=False)
-        self.fp16 = self.model.fp16
+            if Path(str(model)).name in REID_ASSETS:
+                from vision_ai_platform.packages.utils.downloads import attempt_download_asset
 
-        # Get model's input size for a fixed batch and crop size or detect dynamic batch and crop sizes.
-        session = getattr(self.model, "session", None)
-        shape = session.get_inputs()[0].shape if session is not None else ()
-        if len(shape) == 4:
-            if isinstance(shape[0], int) and shape[0] > 0:
-                self.batch_size = shape[0]
-            if isinstance(shape[2], int) and shape[2] > 0:
-                self.imgsz = shape[2]
+                model = attempt_download_asset(str(model))
+            self.model = AutoBackend(str(model), device=self.device, fp16=fp16, verbose=False)
+            self.fp16 = self.model.fp16
+
+            # Get model's input size for a fixed batch and crop size or detect dynamic batch and crop sizes.
+            session = getattr(self.model, "session", None)
+            shape = session.get_inputs()[0].shape if session is not None else ()
+            if len(shape) == 4:
+                if isinstance(shape[0], int) and shape[0] > 0:
+                    self.batch_size = shape[0]
+                if isinstance(shape[2], int) and shape[2] > 0:
+                    self.imgsz = shape[2]
 
     @staticmethod
     def _crop_detections(img: np.ndarray, dets: np.ndarray) -> list[np.ndarray]:
@@ -91,19 +100,25 @@ class ReID:
         if not valid_crops:
             return [None] * len(crops)
 
-        batch = self._crops_to_tensor(valid_crops)
-        bs, n = self.batch_size, batch.shape[0]
-        if bs is None or n == bs:
-            feats = self.model(batch)
-        else:  # fixed-batch model (e.g. static ONNX): run in chunks of bs, padding the last partial chunk
-            outs = []
-            for s in range(0, n, bs):
-                chunk = batch[s : s + bs]
-                if chunk.shape[0] < bs:
-                    chunk = torch.cat([chunk, chunk[-1:].expand(bs - chunk.shape[0], *chunk.shape[1:])], 0)
-                outs.append(self.model(chunk))
-            feats = torch.cat(outs, 0)[:n]
-        valid_feats = [f.cpu().numpy() for f in feats]
+        if self.is_pt:
+            feats = self.model.predictor(valid_crops)
+            if len(feats) != len(valid_crops) and feats[0].shape[0] == len(valid_crops):
+                feats = feats[0]  # batched prediction with non-PyTorch backend
+            valid_feats = [f.cpu().numpy() for f in feats]
+        else:
+            batch = self._crops_to_tensor(valid_crops)
+            bs, n = self.batch_size, batch.shape[0]
+            if bs is None or n == bs:
+                feats = self.model(batch)
+            else:  # fixed-batch model (e.g. static ONNX): run in chunks of bs, padding the last partial chunk
+                outs = []
+                for s in range(0, n, bs):
+                    chunk = batch[s : s + bs]
+                    if chunk.shape[0] < bs:
+                        chunk = torch.cat([chunk, chunk[-1:].expand(bs - chunk.shape[0], *chunk.shape[1:])], 0)
+                    outs.append(self.model(chunk))
+                feats = torch.cat(outs, 0)[:n]
+            valid_feats = [f.cpu().numpy() for f in feats]
 
         valid_feats = iter(valid_feats)
         return [next(valid_feats) if keep else None for keep in valid]

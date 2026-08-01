@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from typing import Optional
+from pathlib import Path
+
 import torch
 import torch.nn.functional as F
 
-from vision_ai_platform.packages.core.predictor import BasePredictor
-from vision_ai_platform.packages.core.results import Results
+from vision_ai_platform.packages.ai.models.common import Predictor
+from vision_ai_platform.packages.core import YOLOConfig, Results
 from vision_ai_platform.packages.utils import DEFAULT_CFG, ops
 
 
-class SemanticSegmentationPredictor(BasePredictor):
+class SemanticSegmentationPredictor(Predictor):
     """Predictor for semantic segmentation models.
 
     This predictor processes model outputs to produce per-pixel class label maps.
@@ -22,15 +25,20 @@ class SemanticSegmentationPredictor(BasePredictor):
         >>> predictor.predict_cli()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks=None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize SemanticSegmentationPredictor.
 
         Args:
             cfg (dict): Configuration for the predictor.
-            overrides (dict, optional): Configuration overrides.
+            save_dir (str | Path, optional): Directory to save prediction results.
             _callbacks (dict, optional): Callback functions.
         """
-        super().__init__(cfg, overrides, _callbacks)
+        super().__init__(cfg, save_dir, _callbacks)
         self.cfg.task = "semantic"
 
     @staticmethod

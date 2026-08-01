@@ -3,19 +3,21 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import torch
+from torch.utils.data import DataLoader
 import torch.distributed as dist
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import ClassificationDataset, build_dataloader
-from vision_ai_platform.packages.core.validator import BaseValidator
+from vision_ai_platform.packages.ai.models.common import Validator
 from vision_ai_platform.packages.utils import LOGGER, RANK
 from vision_ai_platform.packages.utils.metrics import ClassifyMetrics, ConfusionMatrix
 from vision_ai_platform.packages.utils.plotting import plot_images
 
 
-class ClassificationValidator(BaseValidator):
+class ClassificationValidator(Validator):
     """A class extending the BaseValidator class for validation based on a classification model.
 
     This validator handles the validation process for classification models, including metrics calculation, confusion
@@ -53,16 +55,22 @@ class ClassificationValidator(BaseValidator):
         Torchvision classification models can also be passed to the 'model' argument, i.e. model='resnet18'.
     """
 
-    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks: dict | None = None) -> None:
+    def __init__(
+        self,
+        cfg: YOLOConfig,
+        dataloader: Optional[DataLoader] = None,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize ClassificationValidator with dataloader, save directory, and other parameters.
 
         Args:
+            cfg (YOLOConfig): Configuration for the validator.
             dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
             save_dir (str | Path, optional): Directory to save results.
-            args (dict, optional): Arguments containing model and validation configuration.
-            _callbacks (dict, optional): Dictionary of callback functions to be called during validation.
+            _callbacks (dict, optional): Dictionary of callback functions.
         """
-        super().__init__(dataloader, save_dir, args, _callbacks)
+        super().__init__(cfg, dataloader, save_dir, _callbacks)
         self.targets = None
         self.pred = None
         self.cfg.task = "classify"

@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import cv2
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from PIL import Image
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import SemanticDataset
 from vision_ai_platform.packages.ai.data.utils import add_polygon_background
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionValidator
@@ -35,16 +37,22 @@ class SemanticSegmentationValidator(DetectionValidator):
         >>> validator()
     """
 
-    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks=None):
+    def __init__(
+        self,
+        cfg: YOLOConfig,
+        dataloader: Optional[DataLoader] = None,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize SemanticSegmentationValidator.
 
         Args:
-            dataloader (DataLoader, optional): DataLoader for validation.
-            save_dir (Path, optional): Directory to save results.
-            args (dict, optional): Arguments for the validator.
-            _callbacks (dict, optional): Callback functions.
+            cfg (YOLOConfig): Configuration for the validator.
+            dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
+            save_dir (str | Path, optional): Directory to save results.
+            _callbacks (dict, optional): Dictionary of callback functions.
         """
-        super().__init__(dataloader, save_dir, args, _callbacks)
+        super().__init__(cfg, dataloader, save_dir, _callbacks)
         self.cfg.task = "semantic"
         self.dataset = None
         self.results_dir = None

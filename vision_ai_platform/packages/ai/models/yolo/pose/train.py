@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from copy import copy
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from ultralytics.models import yolo
-from ultralytics.nn.tasks import PoseModel
-from ultralytics.utils import DEFAULT_CFG, RANK
-from ultralytics.utils.torch_utils import unwrap_model
+from vision_ai_platform.packages.core import YOLOConfig
+from vision_ai_platform.packages.ai.models import yolo
+from vision_ai_platform.packages.ai.nn.tasks import PoseModel
+from vision_ai_platform.packages.utils import DEFAULT_CFG, RANK
+from vision_ai_platform.packages.utils.device_utils import unwrap_model
 
 
 class PoseTrainer(yolo.detect.DetectionTrainer):
@@ -38,7 +39,12 @@ class PoseTrainer(yolo.detect.DetectionTrainer):
         >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict[str, Any] | None = None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize a PoseTrainer object for training YOLO pose estimation models.
 
         Args:
@@ -50,10 +56,8 @@ class PoseTrainer(yolo.detect.DetectionTrainer):
             This trainer will automatically set the task to 'pose' regardless of what is provided in overrides.
             A warning is issued when using Apple MPS device due to known bugs with pose models.
         """
-        if overrides is None:
-            overrides = {}
-        overrides["task"] = "pose"
-        super().__init__(cfg, overrides, _callbacks)
+        trainer_cfg = cfg.model_copy(update={"task": "pose"})
+        super().__init__(trainer_cfg, save_dir, _callbacks)
 
     def get_model(
         self,
@@ -104,7 +108,7 @@ class PoseTrainer(yolo.detect.DetectionTrainer):
         if getattr(model.model[-1], "flow_model", None) is not None:
             self.loss_names += ("rle_loss",)
         return yolo.pose.PoseValidator(
-            self.test_loader, save_dir=self.save_dir, args=copy(self.cfg), _callbacks=self.callbacks
+            copy(self.cfg), self.test_loader, save_dir=self.save_dir, _callbacks=self.callbacks
         )
 
     def get_dataset(self) -> dict[str, Any]:

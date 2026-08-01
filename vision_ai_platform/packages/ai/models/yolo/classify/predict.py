@@ -5,14 +5,17 @@ from __future__ import annotations
 import cv2
 import torch
 from PIL import Image
+from pathlib import Path
+from typing import Optional
 
 from vision_ai_platform.packages.ai.data.augment import classify_transforms
-from vision_ai_platform.packages.core.predictor import BasePredictor
+from vision_ai_platform.packages.ai.models.common import Predictor
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.core.results import Results
 from vision_ai_platform.packages.utils import DEFAULT_CFG, ops
 
 
-class ClassificationPredictor(BasePredictor):
+class ClassificationPredictor(Predictor):
     """A class extending the BasePredictor class for prediction based on a classification model.
 
     This predictor handles the specific requirements of classification models, including preprocessing images and
@@ -36,7 +39,12 @@ class ClassificationPredictor(BasePredictor):
         - Torchvision classification models can also be passed to the 'model' argument, i.e. model='resnet18'.
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize the ClassificationPredictor with the specified configuration and set task to 'classify'.
 
         This constructor initializes a ClassificationPredictor instance, which extends BasePredictor for classification
@@ -44,10 +52,10 @@ class ClassificationPredictor(BasePredictor):
 
         Args:
             cfg (dict): Default configuration dictionary containing prediction settings.
-            overrides (dict, optional): Configuration overrides that take precedence over cfg.
+            save_dir (str | Path, optional): Directory to save prediction results.
             _callbacks (dict, optional): Dictionary of callback functions to be executed during prediction.
         """
-        super().__init__(cfg, overrides, _callbacks)
+        super().__init__(cfg, save_dir, _callbacks)
         self.cfg.task = "classify"
 
     def setup_source(self, source):

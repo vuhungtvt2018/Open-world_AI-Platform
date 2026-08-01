@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionValidator
 from vision_ai_platform.packages.utils import ops
 from vision_ai_platform.packages.utils.loss import OKS_SIGMA, kpt_iou
@@ -54,19 +56,25 @@ class PoseValidator(DetectionValidator):
         due to a known bug with pose models.
     """
 
-    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks: dict | None = None) -> None:
+    def __init__(
+        self,
+        cfg: YOLOConfig,
+        dataloader: Optional[DataLoader] = None,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize a PoseValidator object for pose estimation validation.
 
         This validator is specifically designed for pose estimation tasks, handling keypoints and implementing
         specialized metrics for pose evaluation.
 
         Args:
-            dataloader (torch.utils.data.DataLoader, optional): DataLoader to be used for validation.
-            save_dir (Path | str, optional): Directory to save results.
-            args (dict, optional): Arguments for the validator including task set to "pose".
-            _callbacks (dict, optional): Dictionary of callback functions to be executed during validation.
+            cfg (YOLOConfig): Configuration for the validator.
+            dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
+            save_dir (str | Path, optional): Directory to save results.
+            _callbacks (dict, optional): Dictionary of callback functions.
         """
-        super().__init__(dataloader, save_dir, args, _callbacks)
+        super().__init__(cfg, dataloader, save_dir, _callbacks)
         self.sigma = None
         self.kpt_shape = None
         self.cfg.task = "pose"

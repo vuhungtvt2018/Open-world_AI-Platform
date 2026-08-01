@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from copy import copy
-from typing import Any
+from typing import Any, Optional
+from pathlib import Path
 
 import torch
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import ClassificationDataset, build_dataloader
-from vision_ai_platform.packages.core.trainer import BaseTrainer
+from vision_ai_platform.packages.ai.models.common import Trainer
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.nn.tasks import ClassificationModel
 from vision_ai_platform.packages.utils import DEFAULT_CFG, LOGGER, RANK
@@ -16,7 +18,7 @@ from vision_ai_platform.packages.utils.plotting import plot_images
 from vision_ai_platform.packages.utils.device_utils import is_parallel, torch_distributed_zero_first
 
 
-class ClassificationTrainer(BaseTrainer):
+class ClassificationTrainer(Trainer):
     """A trainer class extending BaseTrainer for training image classification models.
 
     This trainer handles the training process for image classification tasks, supporting both YOLO classification models
@@ -49,20 +51,24 @@ class ClassificationTrainer(BaseTrainer):
         >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict[str, Any] | None = None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize a ClassificationTrainer object.
 
         Args:
             cfg (dict[str, Any], optional): Default configuration dictionary containing training parameters.
-            overrides (dict[str, Any], optional): Dictionary of parameter overrides for the default configuration.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Dictionary of callback functions to be executed during training.
         """
-        if overrides is None:
-            overrides = {}
-        overrides["task"] = "classify"
-        if overrides.get("imgsz") is None:
-            overrides["imgsz"] = 224
-        super().__init__(cfg, overrides, _callbacks)
+        classify_cfg = cfg.model_copy(update={"task": "classify"})
+        if classify_cfg.imgsz is None:
+            classify_cfg.imgsz = 224
+        
+        super().__init__(classify_cfg, save_dir, _callbacks)
 
     def set_model_attributes(self):
         """Set the YOLO model's class names from the loaded dataset."""
@@ -190,7 +196,7 @@ class ClassificationTrainer(BaseTrainer):
         """Return an instance of ClassificationValidator for validation."""
         self.loss_names = ["loss"]
         return yolo.classify.ClassificationValidator(
-            self.test_loader, self.save_dir, args=copy(self.cfg), _callbacks=self.callbacks
+            copy(self.cfg), self.test_loader, self.save_dir, _callbacks=self.callbacks
         )
 
     def label_loss_items(self, loss_items: torch.Tensor | None = None, prefix: str = "train"):

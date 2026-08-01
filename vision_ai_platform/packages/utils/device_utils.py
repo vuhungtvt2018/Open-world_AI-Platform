@@ -11,6 +11,7 @@ import time
 from copy import deepcopy
 from contextlib import contextmanager
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -18,6 +19,7 @@ import torch.distributed as dist
 
 from vision_ai_platform.packages.utils import (
     LOGGER,
+    DEFAULT_CFG,
     PYTHON_VERSION,
     TORCH_VERSION,
     NUM_THREADS,
@@ -573,6 +575,53 @@ def unwrap_model(m: nn.Module) -> nn.Module:
             return m
 
 
+def one_cycle(y1=0.0, y2=1.0, steps=100):
+    """Return a lambda function for sinusoidal ramp from y1 to y2 https://arxiv.org/pdf/1812.01187.pdf.
+
+    Args:
+        y1 (float, optional): Initial value.
+        y2 (float, optional): Final value.
+        steps (int, optional): Number of steps.
+
+    Returns:
+        (function): Lambda function for computing the sinusoidal ramp.
+    """
+    return lambda x: max((1 - math.cos(x * math.pi / steps)) / 2, 0) * (y2 - y1) + y1
+
+
+def init_seeds(seed=0, deterministic=False):
+    """Initialize random number generator (RNG) seeds https://pytorch.org/docs/stable/notes/randomness.html.
+
+    Args:
+        seed (int, optional): Random seed.
+        deterministic (bool, optional): Whether to set deterministic algorithms.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)  # for Multi-GPU, exception safe
+    # torch.backends.cudnn.benchmark = True  # AutoBatch problem https://github.com/ultralytics/yolov5/issues/9287
+    if deterministic:
+        if TORCH_2_0:
+            torch.use_deterministic_algorithms(True, warn_only=True)  # warn if deterministic is not possible
+            torch.backends.cudnn.deterministic = True
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+            os.environ["PYTHONHASHSEED"] = str(seed)
+        else:
+            LOGGER.warning("Upgrade to torch>=2.0.0 for deterministic training.")
+    else:
+        unset_deterministic()
+
+
+def unset_deterministic():
+    """Unset all the configurations applied for deterministic training."""
+    torch.use_deterministic_algorithms(False)
+    torch.backends.cudnn.deterministic = False
+    os.environ.pop("CUBLAS_WORKSPACE_CONFIG", None)
+    os.environ.pop("PYTHONHASHSEED", None)
+
+
 def model_info(model, detailed=False, verbose=True, imgsz=640):
     """Print and return detailed model information layer by layer.
 
@@ -915,6 +964,138 @@ class ModelEMA:
             copy_attr(self.ema, model, include, exclude)
 
 
+def convert_optimizer_state_dict_to_fp16(state_dict):
+    """Convert the state_dict of a given optimizer to FP16, focusing on the 'state' key for tensor conversions.
+
+    Args:
+        state_dict (dict): Optimizer state dictionary.
+
+    Returns:
+        (dict): Converted optimizer state dictionary with FP16 tensors.
+    """
+    for state in state_dict["state"].values():
+        for k, v in state.items():
+            if k not in {"step", "exp_avg_sq"} and isinstance(v, torch.Tensor) and v.dtype is torch.float32:
+                state[k] = v.half()
+
+    return state_dict
+
+
+@contextmanager
+def cuda_memory_usage(device=None):
+    """Monitor and manage CUDA memory usage.
+
+    This function checks if CUDA is available and, if so, empties the CUDA cache to free up unused memory. It then
+    yields a dictionary containing memory usage information, which can be updated by the caller. Finally, it updates the
+    dictionary with the amount of memory reserved by CUDA on the specified device.
+
+    Args:
+        device (torch.device, optional): The CUDA device to query memory usage for.
+
+    Yields:
+        (dict): A dictionary with a key 'memory' initialized to 0, which will be updated with the reserved memory.
+    """
+    cuda_info = dict(memory=0)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        try:
+            yield cuda_info
+        finally:
+            cuda_info["memory"] = torch.cuda.memory_reserved(device)
+    else:
+        yield cuda_info
+
+
+def profile_ops(input, ops, n=10, device=None, max_num_obj=0):
+    """Ultralytics speed, memory and FLOPs profiler.
+
+    Args:
+        input (torch.Tensor | list): Input tensor(s) to profile.
+        ops (nn.Module | list): Model or list of operations to profile.
+        n (int, optional): Number of iterations to average.
+        device (str | torch.device, optional): Device to profile on.
+        max_num_obj (int, optional): Maximum number of objects for simulation.
+
+    Returns:
+        (list): Profile results for each operation.
+
+    Examples:
+        >>> from ultralytics.utils.torch_utils import profile_ops
+        >>> input = torch.randn(16, 3, 640, 640)
+        >>> m1 = lambda x: x * torch.sigmoid(x)
+        >>> m2 = nn.SiLU()
+        >>> profile_ops(input, [m1, m2], n=100)  # profile over 100 iterations
+    """
+    import gc
+    try:
+        import thop
+    except ImportError:
+        thop = None  # conda support without 'ultralytics-thop' installed
+
+    results = []
+    if not isinstance(device, torch.device):
+        device = select_device(device)
+    LOGGER.info(
+        f"{'Params':>12s}{'GFLOPs':>12s}{'GPU_mem (GB)':>14s}{'forward (ms)':>14s}{'backward (ms)':>14s}"
+        f"{'input':>24s}{'output':>24s}"
+    )
+    gc.collect()  # attempt to free unused memory
+    torch.cuda.empty_cache()
+    for x in input if isinstance(input, list) else [input]:
+        x = x.to(device)
+        x.requires_grad = True
+        for m in ops if isinstance(ops, list) else [ops]:
+            m = m.to(device) if hasattr(m, "to") else m  # device
+            m = m.half() if hasattr(m, "half") and isinstance(x, torch.Tensor) and x.dtype is torch.float16 else m
+            tf, tb, t = 0, 0, [0, 0, 0]  # dt forward, backward
+            try:
+                flops = thop.profile(deepcopy(m), inputs=[x], verbose=False)[0] / 1e9 * 2 if thop else 0  # GFLOPs
+            except Exception:
+                flops = 0
+
+            try:
+                mem = 0
+                for _ in range(n):
+                    with cuda_memory_usage(device) as cuda_info:
+                        t[0] = time_sync()
+                        y = m(x)
+                        t[1] = time_sync()
+                        try:
+                            (sum(yi.sum() for yi in y) if isinstance(y, list) else y).sum().backward()
+                            t[2] = time_sync()
+                        except Exception:  # no backward method
+                            # print(e)  # for debug
+                            t[2] = float("nan")
+                    mem += cuda_info["memory"] / 1e9  # (GB)
+                    tf += (t[1] - t[0]) * 1000 / n  # ms per op forward
+                    tb += (t[2] - t[1]) * 1000 / n  # ms per op backward
+                    if max_num_obj:  # simulate training with predictions per image grid (for AutoBatch)
+                        with cuda_memory_usage(device) as cuda_info:
+                            anchors = int(sum((x.shape[-1] / s) * (x.shape[-2] / s) for s in m.stride.tolist()))
+                            # Envelope of the detect-loss memory peaks: TaskAlignedAssigner.get_box_metrics holds ~6
+                            # simultaneous (bs, max_num_obj, anchors) fp32 buffers (overlaps, bbox_scores, gathered
+                            # pd_scores, two pow temps + align_metric); the cls path holds ~6 (bs, anchors, nc)
+                            # fp32-equivalents (pred/target + two op temps of the unreduced BCE in v8DetectionLoss:
+                            # ~4 in pure fp32, ~6 under AMP where autocast upcasts both BCE inputs to fp32 copies)
+                            sim = (
+                                torch.randn(x.shape[0], 6 * max_num_obj, anchors, device=device, dtype=torch.float32),
+                                torch.randn(x.shape[0], anchors, 6 * len(m.names), device=device, dtype=torch.float32),
+                            )
+                        del sim
+                        mem += cuda_info["memory"] / 1e9  # (GB)
+                s_in, s_out = (tuple(x.shape) if isinstance(x, torch.Tensor) else "list" for x in (x, y))  # shapes
+                p = sum(x.numel() for x in m.parameters()) if isinstance(m, nn.Module) else 0  # parameters
+                LOGGER.info(f"{p:12}{flops:12.4g}{mem:>14.3f}{tf:14.4g}{tb:14.4g}{s_in!s:>24s}{s_out!s:>24s}")
+                results.append([p, flops, mem, tf, tb, s_in, s_out])
+            except Exception as e:
+                LOGGER.info(e)
+                results.append(None)
+            finally:
+                gc.collect()  # attempt to free unused memory
+                torch.cuda.empty_cache()
+    return results
+
+
 class EarlyStopping:
     """Early stopping class that stops training when a specified number of epochs have passed without improvement.
 
@@ -1064,3 +1245,121 @@ def is_parallel(model):
         (bool): True if model is DataParallel or DistributedDataParallel.
     """
     return isinstance(model, (nn.parallel.DataParallel, nn.parallel.DistributedDataParallel))
+
+
+def check_train_batch_size(
+    model: torch.nn.Module,
+    imgsz: int = 640,
+    amp: bool = True,
+    batch: int | float = -1,
+    max_num_obj: int = 1,
+    dataset_size: int = 0,
+) -> int:
+    """Compute optimal YOLO training batch size using the autobatch() function.
+
+    Args:
+        model (torch.nn.Module): YOLO model to check batch size for.
+        imgsz (int, optional): Image size used for training.
+        amp (bool, optional): Use automatic mixed precision if True.
+        batch (int | float, optional): Fraction of GPU memory to use. If -1, use default.
+        max_num_obj (int, optional): The maximum number of objects from dataset.
+        dataset_size (int, optional): Total number of training images. If > 0, batch size will not exceed this value.
+
+    Returns:
+        (int): Optimal batch size computed using the autobatch() function.
+
+    Notes:
+        If 0.0 < batch < 1.0, it's used as the fraction of GPU memory to use.
+        Otherwise, a default fraction of 0.6 is used.
+    """
+    with autocast(enabled=amp):
+        return autobatch(
+            deepcopy(model).train(),
+            imgsz,
+            fraction=batch if 0.0 < batch < 1.0 else 0.6,
+            max_num_obj=max_num_obj,
+            dataset_size=dataset_size,
+        )
+
+
+def autobatch(
+    model: torch.nn.Module,
+    imgsz: int = 640,
+    fraction: float = 0.60,
+    batch_size: int = DEFAULT_CFG.batch,
+    max_num_obj: int = 1,
+    dataset_size: int = 0,
+) -> int:
+    """Automatically estimate the best YOLO batch size to use a fraction of the available CUDA memory.
+
+    Args:
+        model (torch.nn.Module): YOLO model to compute batch size for.
+        imgsz (int, optional): The image size used as input for the YOLO model.
+        fraction (float, optional): The fraction of available CUDA memory to use.
+        batch_size (int, optional): The default batch size to use if an error is detected.
+        max_num_obj (int, optional): The maximum number of objects from dataset.
+        dataset_size (int, optional): Total number of training images. If > 0, batch size will not exceed this value.
+
+    Returns:
+        (int): The optimal batch size.
+    """
+    # Check device
+    prefix = colorstr("AutoBatch: ")
+    LOGGER.info(f"{prefix}Computing optimal batch size for imgsz={imgsz} at {fraction * 100}% CUDA memory utilization.")
+    device = next(model.parameters()).device  # get model device
+    if device.type in {"cpu", "mps"}:
+        LOGGER.warning(f"{prefix}intended for CUDA devices, using default batch-size {batch_size}")
+        return batch_size
+    if torch.backends.cudnn.benchmark:
+        LOGGER.warning(f"{prefix}Requires torch.backends.cudnn.benchmark=False, using default batch-size {batch_size}")
+        return batch_size
+
+    # Inspect CUDA memory
+    gb = 1 << 30  # bytes to GiB (1024 ** 3)
+    d = f"CUDA:{device.index}"  # 'CUDA:0'
+    properties = torch.cuda.get_device_properties(device)  # device properties
+    t = properties.total_memory / gb  # GiB total
+    r = torch.cuda.memory_reserved(device) / gb  # GiB reserved
+    a = torch.cuda.memory_allocated(device) / gb  # GiB allocated
+    f = t - (r + a)  # GiB free
+    LOGGER.info(f"{prefix}{d} ({properties.name}) {t:.2f}G total, {r:.2f}G reserved, {a:.2f}G allocated, {f:.2f}G free")
+
+    # Profile batch sizes
+    batch_sizes = [1, 2, 4, 8, 16] if t < 16 else [1, 2, 4, 8, 16, 32, 64]
+    if dataset_size > 0:
+        batch_sizes = [b for b in batch_sizes if b <= dataset_size]
+    ch = model.yaml.get("channels", 3)
+    try:
+        img = [torch.empty(b, ch, imgsz, imgsz) for b in batch_sizes]
+        results = profile_ops(img, model, n=1, device=device, max_num_obj=max_num_obj)
+
+        # Fit a solution
+        xy = [
+            [x, y[2]]
+            for i, (x, y) in enumerate(zip(batch_sizes, results))
+            if y  # valid result
+            and isinstance(y[2], (int, float))  # is numeric
+            and 0 < y[2] < t  # between 0 and GPU limit
+            and (i == 0 or not results[i - 1] or y[2] > results[i - 1][2])  # first item or increasing memory
+        ]
+        fit_x, fit_y = zip(*xy) if xy else ([], [])
+        p = np.polyfit(fit_x, fit_y, deg=1)  # first-degree (linear) polynomial fit
+        b = int((round(f * fraction) - p[1]) / p[0])  # y intercept (optimal batch size)
+        if None in results:  # some sizes failed
+            i = results.index(None)  # first fail index
+            if b >= batch_sizes[i]:  # y intercept above failure point
+                b = batch_sizes[max(i - 1, 0)]  # select prior safe point
+        if b < 1 or b > 1024:  # b outside of safe range
+            LOGGER.warning(f"{prefix}batch={b} outside safe range, using default batch-size {batch_size}.")
+            b = batch_size
+        if dataset_size > 0:
+            b = min(b, dataset_size)
+
+        fraction = (np.polyval(p, b) + r + a) / t  # predicted fraction
+        LOGGER.info(f"{prefix}Using batch-size {b} for {d} {t * fraction:.2f}G/{t:.2f}G ({fraction * 100:.0f}%) ✅")
+        return b
+    except Exception as e:
+        LOGGER.warning(f"{prefix}error detected: {e},  using default batch-size {batch_size}.")
+        return batch_size
+    finally:
+        torch.cuda.empty_cache()

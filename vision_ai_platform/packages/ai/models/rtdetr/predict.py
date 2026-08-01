@@ -1,12 +1,12 @@
 import torch
 
 from vision_ai_platform.packages.ai.data.augment import LetterBox
-from vision_ai_platform.packages.core.predictor import BasePredictor
+from vision_ai_platform.packages.ai.models.common import Predictor
 from vision_ai_platform.packages.core.results import Results
 from vision_ai_platform.packages.utils import ops
 
 
-class RTDETRPredictor(BasePredictor):
+class RTDETRPredictor(Predictor):
     """RT-DETR (Real-Time Detection Transformer) Predictor extending the BasePredictor class for making predictions.
 
     This class leverages Vision Transformers to provide real-time object detection while maintaining high accuracy. It

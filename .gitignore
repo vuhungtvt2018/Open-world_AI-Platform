@@ -221,3 +221,7 @@ __marimo__/
 
 # VSCode
 .vscode
+
+# Generated databases
+edge.db
+server.db

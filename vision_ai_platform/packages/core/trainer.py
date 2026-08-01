@@ -72,14 +72,14 @@ class BaseTrainer(ABC):
     def __init__(
         self,
         cfg: YOLOConfig,
-        save_dir: str | Path,
+        save_dir: Optional[str | Path] = None,
         _callbacks: dict | None = None
     ):
         """Initialize the BaseTrainer class.
 
         Args:
             cfg (YOLOConfig): Configuration for the trainer.
-            save_dir (str | Path): Directory path to save training results.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Dictionary of callback functions.
         """
         self.cfg = cfg
@@ -89,9 +89,7 @@ class BaseTrainer(ABC):
         self.plots = {}
 
         # Dirs
-        self.save_dir = save_dir
-        self.cfg.name = self.save_dir.name  # update name for loggers
-        self.wdir = self.save_dir / "weights"  # weights dir
+        self.save_dir = Path(save_dir) if save_dir else None        
 
         self.batch_size = self.cfg.batch
         self.epochs = self.cfg.epochs or 100  # in case users accidentally pass epochs=None with timed training
@@ -125,10 +123,7 @@ class BaseTrainer(ABC):
         self.fitness = None
         self.loss = None
         self.tloss = None
-        self.loss_names = ["Loss"]
-        self.csv = self.save_dir / "results.csv"
-        if self.csv.exists() and not self.cfg.resume:
-            self.csv.unlink()
+        self.loss_names = ["Loss"]        
         self.plot_idx = [0, 1, 2]
         self.nan_recovery_attempts = 0
 
@@ -257,18 +252,22 @@ class BaseTrainer(ABC):
             self.best_fitness = fitness
         return metrics, fitness
 
+    @abstractmethod
     def get_model(self, cfg=None, weights=None, verbose=True):
         """Get model and raise NotImplementedError for loading cfg files."""
         raise NotImplementedError("This task trainer doesn't support loading cfg files")
 
+    @abstractmethod
     def get_validator(self):
         """Raise NotImplementedError (must be implemented by subclasses)."""
         raise NotImplementedError("get_validator function not implemented in trainer")
 
+    @abstractmethod
     def get_dataloader(self, dataset_path, batch_size=16, rank=0, mode="train"):
         """Raise NotImplementedError (must return a `torch.utils.data.DataLoader` in subclasses)."""
         raise NotImplementedError("get_dataloader function not implemented in trainer")
 
+    @abstractmethod
     def build_dataset(self, img_path, mode="train", batch=None):
         """Build dataset."""
         raise NotImplementedError("build_dataset function not implemented in trainer")
@@ -285,23 +284,27 @@ class BaseTrainer(ABC):
         """Set or update model parameters before training."""
         self.model.names = self.data["names"]
 
+    @abstractmethod
     def set_class_weights(self):
         """Compute and set class weights for handling class imbalance. Override in subclasses."""
         pass
 
+    @abstractmethod
     def build_targets(self, preds, targets):
         """Build target tensors for training YOLO model."""
         pass
 
+    @abstractmethod
     def progress_string(self):
         """Return a string describing training progress."""
         return ""
 
-    # TODO: may need to put these following functions into callback
+    @abstractmethod
     def plot_training_samples(self, batch, ni):
         """Plot training samples during YOLO training."""
         pass
 
+    @abstractmethod
     def plot_training_labels(self):
         """Plot training labels for YOLO model."""
         pass

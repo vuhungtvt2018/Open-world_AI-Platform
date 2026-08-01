@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionValidator
 from vision_ai_platform.packages.utils import LOGGER, ops
 from vision_ai_platform.packages.utils.metrics import OBBMetrics
@@ -45,19 +47,25 @@ class OBBValidator(DetectionValidator):
         >>> validator(model=args["model"])
     """
 
-    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks: dict | None = None) -> None:
+    def __init__(
+        self,
+        cfg: YOLOConfig,
+        dataloader: Optional[DataLoader] = None,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize OBBValidator and set task to 'obb', metrics to OBBMetrics.
 
         This constructor initializes an OBBValidator instance for validating Oriented Bounding Box (OBB) models. It
         extends the DetectionValidator class and configures it specifically for the OBB task.
 
         Args:
-            dataloader (torch.utils.data.DataLoader, optional): DataLoader to be used for validation.
+            cfg (YOLOConfig): Configuration for the validator.
+            dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
             save_dir (str | Path, optional): Directory to save results.
-            args (dict, optional): Arguments containing validation parameters.
-            _callbacks (dict, optional): Dictionary of callback functions to be called during validation.
+            _callbacks (dict, optional): Dictionary of callback functions.
         """
-        super().__init__(dataloader, save_dir, args, _callbacks)
+        super().__init__(cfg, dataloader, save_dir, _callbacks)
         self.cfg.task = "obb"
         self.metrics = OBBMetrics()
 

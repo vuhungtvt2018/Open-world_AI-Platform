@@ -1,11 +1,11 @@
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 
-from vision_ai_platform.packages.core.predictor import BasePredictor
+from vision_ai_platform.packages.ai.models.common import Predictor
 from vision_ai_platform.packages.core.results import Results
 from vision_ai_platform.packages.utils import nms, ops
 
 
-class DetectionPredictor(BasePredictor):
+class DetectionPredictor(Predictor):
     """A class extending the BasePredictor class for prediction based on a detection model.
 
     This predictor specializes in object detection tasks, processing model outputs into meaningful detection results

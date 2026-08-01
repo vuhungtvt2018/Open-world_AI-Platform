@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from copy import copy
-from typing import Any
+from typing import Any, Optional
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data.utils import add_polygon_background
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionTrainer
@@ -29,18 +31,21 @@ class SemanticSegmentationTrainer(DetectionTrainer):
         >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict[str, Any] | None = None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize SemanticSegmentationTrainer.
 
         Args:
             cfg (dict): Configuration dictionary with default training settings.
-            overrides (dict, optional): Dictionary of parameter overrides.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Callback functions.
         """
-        if overrides is None:
-            overrides = {}
-        overrides["task"] = "semantic"
-        super().__init__(cfg, overrides, _callbacks)
+        trainer_cfg = cfg.model_copy(update={"task": "semantic"})
+        super().__init__(trainer_cfg, save_dir, _callbacks)
 
     def get_dataset(self):
         """Parse the dataset YAML and add background metadata for polygon labels when required."""
@@ -69,7 +74,7 @@ class SemanticSegmentationTrainer(DetectionTrainer):
         """Return a SemanticSegmentationValidator for model evaluation."""
         self.loss_names = "ce_loss", "dice_loss", "aux_loss"
         return yolo.semantic.SemanticSegmentationValidator(
-            self.test_loader, save_dir=self.save_dir, args=copy(self.cfg), _callbacks=self.callbacks
+            copy(self.cfg), self.test_loader, save_dir=self.save_dir, _callbacks=self.callbacks
         )
 
     def set_class_weights(self):

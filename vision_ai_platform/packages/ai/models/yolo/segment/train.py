@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from copy import copy
 from pathlib import Path
+from typing import Optional
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.nn.tasks import SegmentationModel
 from vision_ai_platform.packages.utils import DEFAULT_CFG, RANK
@@ -26,18 +28,21 @@ class SegmentationTrainer(yolo.detect.DetectionTrainer):
         >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict | None = None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize a SegmentationTrainer object.
 
         Args:
             cfg (dict): Configuration dictionary with default training settings.
-            overrides (dict, optional): Dictionary of parameter overrides for the default configuration.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Dictionary of callback functions to be executed during training.
         """
-        if overrides is None:
-            overrides = {}
-        overrides["task"] = "segment"
-        super().__init__(cfg, overrides, _callbacks)
+        trainer_cfg = cfg.model_copy(update={"task": "segment"})
+        super().__init__(trainer_cfg, save_dir, _callbacks)
 
     def get_model(self, cfg: dict | str | None = None, weights: str | Path | None = None, verbose: bool = True):
         """Initialize and return a SegmentationModel with specified configuration and weights.
@@ -67,5 +72,5 @@ class SegmentationTrainer(yolo.detect.DetectionTrainer):
         """Return an instance of SegmentationValidator for validation of YOLO model."""
         self.loss_names = "box_loss", "seg_loss", "cls_loss", "dfl_loss", "sem_loss"
         return yolo.segment.SegmentationValidator(
-            self.test_loader, save_dir=self.save_dir, args=copy(self.cfg), _callbacks=self.callbacks
+            copy(self.cfg), self.test_loader, save_dir=self.save_dir, _callbacks=self.callbacks
         )

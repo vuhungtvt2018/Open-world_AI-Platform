@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from copy import copy
+from typing import Optional
 from pathlib import Path
 
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.nn.tasks import OBBModel
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.utils import DEFAULT_CFG, RANK
 
 
@@ -31,20 +33,22 @@ class OBBTrainer(yolo.detect.DetectionTrainer):
         >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict | None = None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize an OBBTrainer object for training Oriented Bounding Box (OBB) models.
 
         Args:
             cfg (dict, optional): Configuration dictionary for the trainer. Contains training parameters and model
                 configuration.
-            overrides (dict, optional): Dictionary of parameter overrides for the configuration. Any values here will
-                take precedence over those in cfg.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Dictionary of callback functions to be invoked during training.
         """
-        if overrides is None:
-            overrides = {}
-        overrides["task"] = "obb"
-        super().__init__(cfg, overrides, _callbacks)
+        trainer_cfg = cfg.model_copy(update={"task": "obb"})
+        super().__init__(trainer_cfg, save_dir, _callbacks)
 
     def get_model(
         self, cfg: str | dict | None = None, weights: str | Path | None = None, verbose: bool = True
@@ -76,5 +80,5 @@ class OBBTrainer(yolo.detect.DetectionTrainer):
         """Return an instance of OBBValidator for validation of YOLO model."""
         self.loss_names = "box_loss", "cls_loss", "dfl_loss", "angle_loss"
         return yolo.obb.OBBValidator(
-            self.test_loader, save_dir=self.save_dir, args=copy(self.cfg), _callbacks=self.callbacks
+            copy(self.cfg), self.test_loader, save_dir=self.save_dir, _callbacks=self.callbacks
         )

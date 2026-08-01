@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 import torch.distributed as dist
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import build_dataloader, build_yolo_dataset
 from vision_ai_platform.packages.utils import converter
-from vision_ai_platform.packages.core.validator import BaseValidator
+from vision_ai_platform.packages.ai.models.common import Validator
 from vision_ai_platform.packages.utils import LOGGER, RANK, nms, ops
 from vision_ai_platform.packages.utils.check import check_requirements
 from vision_ai_platform.packages.utils.metrics import ConfusionMatrix, DetMetrics
@@ -20,7 +22,7 @@ from vision_ai_platform.packages.utils.loss import box_iou
 from vision_ai_platform.packages.utils.plotting import plot_images
 from vision_ai_platform.packages.utils.save_results import save_txt
 
-class DetectionValidator(BaseValidator):
+class DetectionValidator(Validator):
     """A class extending the BaseValidator class for validation based on a detection model.
 
     This class implements validation functionality specific to object detection tasks, including metrics calculation,
@@ -43,16 +45,22 @@ class DetectionValidator(BaseValidator):
         >>> validator()
     """
 
-    def __init__(self, dataloader=None, save_dir=None, args=None, _callbacks: dict | None = None) -> None:
+    def __init__(
+        self,
+        cfg: YOLOConfig,
+        dataloader: Optional[DataLoader] = None,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize detection validator with necessary variables and settings.
 
         Args:
+            cfg (YOLOConfig): Configuration for the validator.
             dataloader (torch.utils.data.DataLoader, optional): DataLoader to use for validation.
-            save_dir (Path, optional): Directory to save results.
-            args (dict[str, Any], optional): Arguments for the validator.
+            save_dir (str | Path, optional): Directory to save results.
             _callbacks (dict, optional): Dictionary of callback functions.
         """
-        super().__init__(dataloader, save_dir, args, _callbacks)
+        super().__init__(cfg, dataloader, save_dir, _callbacks)
         self.is_coco = False
         self.is_lvis = False
         self.class_map = None

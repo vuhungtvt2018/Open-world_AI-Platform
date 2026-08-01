@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import YOLOConcatDataset, build_grounding, build_yolo_dataset
 from vision_ai_platform.packages.ai.data.utils import check_det_dataset
 from vision_ai_platform.packages.ai.models.yolo.world import WorldTrainer
@@ -54,7 +56,12 @@ class WorldTrainerFromScratch(WorldTrainer):
         >>> model.train(data=data, trainer=WorldTrainerFromScratch)
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize a WorldTrainerFromScratch object.
 
         This initializes a trainer for YOLO-World models from scratch, supporting mixed datasets including both object
@@ -62,12 +69,10 @@ class WorldTrainerFromScratch(WorldTrainer):
 
         Args:
             cfg (dict): Configuration dictionary with default parameters for model training.
-            overrides (dict, optional): Dictionary of parameter overrides to customize the configuration.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Dictionary of callback functions to run during different stages of training.
         """
-        if overrides is None:
-            overrides = {}
-        super().__init__(cfg, overrides, _callbacks)
+        super().__init__(cfg, save_dir, _callbacks)
 
     def build_dataset(self, img_path, mode="train", batch=None):
         """Build YOLO Dataset for training or validation.

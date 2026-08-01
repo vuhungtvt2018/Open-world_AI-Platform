@@ -103,7 +103,7 @@ class BaseModel(nn.Module, ABC):
         self.model = None  # model object
         self.trainer = None  # trainer object
         self.ckpt = {}  # if loaded from *.pt
-        self.cfg = None  # if loaded from *.yaml
+        self.cfg_path = None  # if loaded from *.yaml
         self.ckpt_path = None
         self.overrides = {}  # overrides for trainer object
         self.metrics = None  # validation/training metrics
@@ -141,7 +141,7 @@ class BaseModel(nn.Module, ABC):
             **kwargs (Any): Additional keyword arguments to configure the prediction process.
 
         Returns:
-            (Iterator[ultralytics.engine.results.Results | torch.Tensor] | list[ultralytics.engine.results.Results] |
+            (Iterator[vision_ai_platform.packages.core.results.Results | torch.Tensor] | list[vision_ai_platform.packages.core.results.Results] |
             list[torch.Tensor]): Prediction results or embeddings, streamed when `stream=True`.
 
         Examples:
@@ -152,39 +152,15 @@ class BaseModel(nn.Module, ABC):
         """
         return self.predict(source, stream, **kwargs)
 
-    @staticmethod
-    def is_triton_model(model: str) -> bool:
-        """Check if the given model string is a Triton Server URL.
-
-        This static method determines whether the provided model string represents a valid Triton Server URL by parsing
-        its components using urllib.parse.urlsplit().
-
-        Args:
-            model (str): The model string to be checked.
-
-        Returns:
-            (bool): True if the model string is a valid Triton Server URL, False otherwise.
-
-        Examples:
-            >>> Model.is_triton_model("http://localhost:8000/v2/models/yolo11n")
-            True
-            >>> Model.is_triton_model("yolo26n.pt")
-            False
-        """
-        from urllib.parse import urlsplit
-
-        url = urlsplit(model)
-        return url.netloc and url.path and url.scheme in {"http", "grpc"}
-
     @abstractmethod
-    def _new(self, cfg: str, task=None, model=None, verbose=False) -> None:
+    def _new(self, cfg_path: str, task=None, model=None, verbose=False) -> None:
         """Initialize a new model and infer the task type from model definitions.
 
         Creates a new model instance based on the provided configuration file. Loads the model configuration, infers the
         task type if not specified, and initializes the model using the appropriate class from the task map.
 
         Args:
-            cfg (str): Path to the model configuration file in YAML format.
+            cfg_path (str): Path to the model configuration file in YAML format.
             task (str, optional): The specific task for the model. If None, it will be inferred from the config.
             model (type[torch.nn.Module], optional): A custom model class. If provided, it will be used instead of the
                 default model class from the task map.
@@ -193,10 +169,6 @@ class BaseModel(nn.Module, ABC):
         Raises:
             ValueError: If the configuration file is invalid or the task cannot be inferred.
             ImportError: If the required dependencies for the specified task are not installed.
-
-        Examples:
-            >>> model = Model()
-            >>> model._new("yolo26n.yaml", task="detect", verbose=True)
         """
         pass
 
@@ -214,11 +186,6 @@ class BaseModel(nn.Module, ABC):
         Raises:
             FileNotFoundError: If the specified weights file does not exist or is inaccessible.
             ValueError: If the weights file format is unsupported or invalid.
-
-        Examples:
-            >>> model = Model()
-            >>> model._load("yolo26n.pt")
-            >>> model._load("path/to/weights.pth", task="detect")
         """
         pass
 
@@ -289,11 +256,6 @@ class BaseModel(nn.Module, ABC):
 
         Raises:
             TypeError: If the model is not a PyTorch model.
-
-        Examples:
-            >>> model = Model()
-            >>> model.load("yolo26n.pt")
-            >>> model.load(Path("path/to/weights.pt"))
         """
         pass
 
@@ -323,8 +285,6 @@ class BaseModel(nn.Module, ABC):
             "model": deepcopy(self.model).half() if isinstance(self.model, torch.nn.Module) else self.model,
             "date": datetime.now().isoformat(),
             "version": __version__,
-            "license": "AGPL-3.0 License (https://ultralytics.com/license)",
-            "docs": "https://docs.ultralytics.com",
         }
         torch.save({**self.ckpt, **updates}, filename)
 
@@ -429,7 +389,7 @@ class BaseModel(nn.Module, ABC):
                 for returning feature embeddings from specified layers.
 
         Returns:
-            (Iterator[ultralytics.engine.results.Results | torch.Tensor] | list[ultralytics.engine.results.Results] |
+            (Iterator[vision_ai_platform.packages.core.results.Results | torch.Tensor] | list[vision_ai_platform.packages.core.results.Results] |
             list[torch.Tensor]): Prediction results or embeddings, streamed when `stream=True`.
 
         Examples:
@@ -467,7 +427,7 @@ class BaseModel(nn.Module, ABC):
             **kwargs (Any): Additional keyword arguments for configuring the tracking process.
 
         Returns:
-            (list[ultralytics.engine.results.Results]): A list of tracking results, each a Results object.
+            (list[vision_ai_platform.packages.core.results.Results]): A list of tracking results, each a Results object.
 
         Examples:
             >>> model = YOLO("yolo26n.pt")
@@ -519,6 +479,7 @@ class BaseModel(nn.Module, ABC):
         self.metrics = validator.metrics
         return validator.metrics
 
+    @abstractmethod
     def export(
         self,
         **kwargs: Any,
@@ -551,18 +512,7 @@ class BaseModel(nn.Module, ABC):
             >>> model.export(format="onnx", dynamic=True, simplify=True)
             'path/to/exported/model.onnx'
         """
-        self._check_is_pytorch_model()
-        from .exporter import Exporter
-
-        custom = {
-            "imgsz": self.model.args["imgsz"],
-            "batch": 1,
-            "data": None,
-            "device": None,  # reset to avoid multi-GPU errors
-            "verbose": False,
-        }  # method defaults
-        args = {**self.overrides, **custom, **kwargs, "mode": "export"}  # highest priority args on the right
-        return Exporter(overrides=args, _callbacks=self.callbacks)(model=self.model)
+        raise NotImplementedError()
 
     @abstractmethod
     def train(

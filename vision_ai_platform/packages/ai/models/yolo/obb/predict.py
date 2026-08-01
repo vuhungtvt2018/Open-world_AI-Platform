@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Optional
+from pathlib import Path
+
 import torch
 
-from vision_ai_platform.packages.core.results import Results
+from vision_ai_platform.packages.core import Results, YOLOConfig
 from vision_ai_platform.packages.ai.models.yolo.detect.predict import DetectionPredictor
 from vision_ai_platform.packages.utils import DEFAULT_CFG, ops
 
@@ -27,15 +30,20 @@ class OBBPredictor(DetectionPredictor):
         >>> predictor.predict_cli()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None,
+    ):
         """Initialize OBBPredictor with optional model and data configuration overrides.
 
         Args:
             cfg (dict, optional): Default configuration for the predictor.
-            overrides (dict, optional): Configuration overrides that take precedence over the default config.
+            save_dir (str | Path, optional): Directory to save the prediction results
             _callbacks (dict, optional): Dictionary of callback functions to be invoked during prediction.
         """
-        super().__init__(cfg, overrides, _callbacks)
+        super().__init__(cfg, save_dir, _callbacks)
         self.cfg.task = "obb"
 
     def construct_result(self, pred, img, orig_img, img_path):

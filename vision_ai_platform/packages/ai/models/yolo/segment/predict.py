@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
+
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.core.results import Results
 from vision_ai_platform.packages.ai.models.yolo.detect.predict import DetectionPredictor
 from vision_ai_platform.packages.utils import DEFAULT_CFG, ops
@@ -31,7 +35,12 @@ class SegmentationPredictor(DetectionPredictor):
         >>> predictor.predict_cli()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides=None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize the SegmentationPredictor with configuration, overrides, and callbacks.
 
         This class specializes in processing segmentation model outputs, handling both bounding boxes and masks in the
@@ -39,10 +48,10 @@ class SegmentationPredictor(DetectionPredictor):
 
         Args:
             cfg (dict): Configuration for the predictor.
-            overrides (dict, optional): Configuration overrides that take precedence over cfg.
+            save_dir (str | Path, optional): Directory to save prediction results.
             _callbacks (dict, optional): Dictionary of callback functions to be invoked during prediction.
         """
-        super().__init__(cfg, overrides, _callbacks)
+        super().__init__(cfg, save_dir, _callbacks)
         self.cfg.task = "segment"
 
     def postprocess(self, preds, img, orig_imgs):

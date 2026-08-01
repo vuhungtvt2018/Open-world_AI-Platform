@@ -12,10 +12,11 @@ import cv2
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.utils.data import DataLoader
 
 from .config import YOLOConfig
 
-class BaseValidator:
+class BaseValidator(ABC):
     """A base class for creating validators.
 
     This class provides the foundation for validation processes, including model evaluation, metric computation, and
@@ -69,8 +70,8 @@ class BaseValidator:
     def __init__(
         self,
         cfg: YOLOConfig,
-        dataloader=None,
-        save_dir=None,
+        dataloader: Optional[DataLoader] = None,
+        save_dir: Optional[str | Path] = None,
         _callbacks: dict | None = None
     ):
         """Initialize a BaseValidator instance.
@@ -78,7 +79,7 @@ class BaseValidator:
         Args:
             cfgs (YOLOConfig): Configuration for the validator.
             dataloader (torch.utils.data.DataLoader, optional): DataLoader to be used for validation.
-            save_dir (Path, optional): Directory to save results.
+            save_dir (str | Path, optional): Directory to save results.
             _callbacks (dict, optional): Dictionary to store various callback functions.
         """
         import torchvision  # noqa (import here so torchvision import time not recorded in postprocess time)
@@ -98,11 +99,6 @@ class BaseValidator:
         self.iouv = None
         self.jdict = None
         self.speed = {"preprocess": 0.0, "inference": 0.0, "loss": 0.0, "postprocess": 0.0}
-
-        self.save_dir = save_dir
-        (self.save_dir / "labels" if self.cfg.save_txt else self.save_dir).mkdir(parents=True, exist_ok=True)
-        if self.cfg.conf is None:
-            self.cfg.conf = 0.01 if self.cfg.task == "obb" else 0.001  # reduce OBB val memory usage
 
         self.plots = {}
         self.callbacks = None
@@ -146,10 +142,12 @@ class BaseValidator:
         for callback in self.callbacks.get(event, []):
             callback(self)
 
+    @abstractmethod
     def get_dataloader(self, dataset_path, batch_size):
         """Get data loader from dataset path and batch size."""
         raise NotImplementedError("get_dataloader function not implemented for this validator")
 
+    @abstractmethod
     def build_dataset(self, img_path):
         """Build dataset from image path."""
         raise NotImplementedError("build_dataset function not implemented in validator")
@@ -162,18 +160,22 @@ class BaseValidator:
         """Postprocess the predictions."""
         return preds
 
+    @abstractmethod
     def init_metrics(self, model):
         """Initialize performance metrics for the YOLO model."""
         pass
 
+    @abstractmethod
     def update_metrics(self, preds, batch):
         """Update metrics based on predictions and batch."""
         pass
 
+    @abstractmethod
     def finalize_metrics(self):
         """Finalize and return all metrics."""
         pass
 
+    @abstractmethod
     def get_stats(self):
         """Return statistics about the model's performance."""
         return {}
@@ -182,10 +184,12 @@ class BaseValidator:
         """Gather statistics from all the GPUs during DDP training to GPU 0."""
         pass
 
+    @abstractmethod
     def print_results(self):
         """Print the results of the model's predictions."""
         pass
 
+    @abstractmethod
     def get_desc(self):
         """Get description of the YOLO model."""
         pass
@@ -202,18 +206,23 @@ class BaseValidator:
             return  # Skip duplicate plot types
         self.plots[Path(name)] = {"data": data, "timestamp": time.time()}
 
+    @abstractmethod
     def plot_val_samples(self, batch, ni):
         """Plot validation samples during training."""
         pass
 
+
+    @abstractmethod
     def plot_predictions(self, batch, preds, ni):
         """Plot YOLO model predictions on batch images."""
         pass
 
+    @abstractmethod
     def pred_to_json(self, preds, batch):
         """Convert predictions to JSON format."""
         pass
 
+    @abstractmethod
     def eval_json(self, stats):
         """Evaluate and return JSON format of prediction statistics."""
         pass

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from copy import copy, deepcopy
 from pathlib import Path
+from typing import Optional
 
 import torch
 
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.ai.data import YOLOConcatDataset, build_yolo_dataset
 from vision_ai_platform.packages.ai.data.augment import LoadVisualPrompt
 from vision_ai_platform.packages.ai.models.yolo.detect import DetectionTrainer, DetectionValidator
@@ -33,19 +35,22 @@ class YOLOETrainer(DetectionTrainer):
         build_dataset: Build YOLO dataset with multi-modal support for training.
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict | None = None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize the YOLOE Trainer with specified configurations.
 
         Args:
             cfg (dict): Configuration dictionary with default training settings from DEFAULT_CFG.
-            overrides (dict, optional): Dictionary of parameter overrides for the default configuration.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Dictionary of callback functions to be applied during training.
         """
-        if overrides is None:
-            overrides = {}
-        assert not overrides.get("compile"), f"Training with 'model={overrides['model']}' requires 'compile=False'"
-        overrides["overlap_mask"] = False
-        super().__init__(cfg, overrides, _callbacks)
+        assert not cfg.compile, f"Training with 'model={cfg.model}' requires 'compile=False'"
+        trainer_cfg = cfg.model_copy(update={"overlap_mask": False})
+        super().__init__(trainer_cfg, save_dir, _callbacks)
 
     def get_model(self, cfg=None, weights=None, verbose: bool = True):
         """Return a YOLOEModel initialized with the specified configuration and weights.
@@ -81,7 +86,7 @@ class YOLOETrainer(DetectionTrainer):
         """Return a YOLOEDetectValidator for YOLOE model validation."""
         self.loss_names = "box", "cls", "dfl"
         return YOLOEDetectValidator(
-            self.test_loader, save_dir=self.save_dir, args=copy(self.cfg), _callbacks=self.callbacks
+            copy(self.cfg), self.test_loader, save_dir=self.save_dir, _callbacks=self.callbacks
         )
 
     def build_dataset(self, img_path: str, mode: str = "train", batch: int | None = None):

@@ -5,22 +5,24 @@ from __future__ import annotations
 import math
 import random
 from copy import copy
-from typing import Any
+from typing import Any, Optional
+from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
 
 from vision_ai_platform.packages.ai.data import build_dataloader, build_yolo_dataset
-from vision_ai_platform.packages.core.trainer import BaseTrainer
+from vision_ai_platform.packages.ai.models.common import Trainer
 from vision_ai_platform.packages.ai.models import yolo
 from vision_ai_platform.packages.ai.nn.tasks import DetectionModel
+from vision_ai_platform.packages.core import YOLOConfig
 from vision_ai_platform.packages.utils import DEFAULT_CFG, LOGGER, RANK
 from vision_ai_platform.packages.utils.plotting import plot_images, plot_labels
 from vision_ai_platform.packages.utils.device_utils import torch_distributed_zero_first, unwrap_model
 
 
-class DetectionTrainer(BaseTrainer):
+class DetectionTrainer(Trainer):
     """A class extending the BaseTrainer class for training based on a detection model.
 
     This trainer specializes in object detection tasks, handling the specific requirements for training YOLO models for
@@ -51,15 +53,20 @@ class DetectionTrainer(BaseTrainer):
         >>> trainer.train()
     """
 
-    def __init__(self, cfg=DEFAULT_CFG, overrides: dict[str, Any] | None = None, _callbacks: dict | None = None):
+    def __init__(
+        self,
+        cfg: YOLOConfig = DEFAULT_CFG,
+        save_dir: Optional[str | Path] = None,
+        _callbacks: dict | None = None
+    ):
         """Initialize a DetectionTrainer object for training YOLO object detection models.
 
         Args:
             cfg (dict, optional): Default configuration dictionary containing training parameters.
-            overrides (dict, optional): Dictionary of parameter overrides for the default configuration.
+            save_dir (str | Path, optional): Directory path to save training results.
             _callbacks (dict, optional): Dictionary of callback functions to be executed during training.
         """
-        super().__init__(cfg, overrides, _callbacks)
+        super().__init__(cfg, save_dir, _callbacks)
 
     def build_dataset(self, img_path: str, mode: str = "train", batch: int | None = None):
         """Build YOLO Dataset for training or validation.
@@ -206,7 +213,10 @@ class DetectionTrainer(BaseTrainer):
         """Return a DetectionValidator for YOLO model validation."""
         self.loss_names = "box_loss", "cls_loss", "dfl_loss"
         return yolo.detect.DetectionValidator(
-            self.test_loader, save_dir=self.save_dir, args=copy(self.cfg), _callbacks=self.callbacks
+            cfg=copy(self.cfg),
+            dataloader=self.test_loader,
+            save_dir=self.save_dir,
+            _callbacks=self.callbacks
         )
 
     def label_loss_items(self, loss_items: list[float] | None = None, prefix: str = "train"):

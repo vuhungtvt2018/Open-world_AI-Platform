@@ -11,6 +11,9 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+from vision_ai_platform.packages.core.config import YOLOConfig
+from vision_ai_platform.packages.utils import ROOT, TESTS_RUNNING, SETTINGS, RANK
+
 
 class WorkingDirectory(contextlib.ContextDecorator):
     """A context manager and decorator for temporarily changing the working directory.
@@ -178,3 +181,31 @@ def get_latest_run(search_dir: str = ".") -> str:
     """Return the path to the most recent 'last.pt' file in the specified directory for resuming training."""
     last_list = glob.glob(f"{search_dir}/**/last*.pt", recursive=True)
     return max(last_list, key=os.path.getctime) if last_list else ""
+
+
+def get_save_dir(args: YOLOConfig, name: str | None = None) -> Path:
+    """Return the directory path for saving outputs, derived from arguments or default settings.
+
+    Args:
+        args (YOLOConfig): Namespace object containing configurations such as 'project', 'name', 'task', 'mode',
+            and 'save_dir'.
+        name (str | None): Optional name for the output directory. If not provided, it defaults to 'args.name' or the
+            'args.mode'.
+
+    Returns:
+        (Path): Directory path where outputs should be saved.
+    """
+    if getattr(args, "save_dir", None):
+        save_dir = args.save_dir
+    else:
+        project = args.project or ""
+        if not Path(project).is_absolute():
+            base = ROOT.parent / "tests/tmp/runs" if TESTS_RUNNING else Path(SETTINGS["runs_dir"])
+            worker = os.environ.get("PYTEST_XDIST_WORKER")
+            if worker and TESTS_RUNNING:  # isolate parallel pytest-xdist workers
+                base = base / worker
+            project = base / args.task / project
+        name = name or args.name or f"{args.mode}"
+        save_dir = increment_path(Path(project) / name, exist_ok=args.exist_ok if RANK in {-1, 0} else True)
+
+    return Path(save_dir).resolve()  # resolve to display full path in console
