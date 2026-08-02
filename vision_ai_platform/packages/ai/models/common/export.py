@@ -22,6 +22,7 @@ from vision_ai_platform.packages.core.exporter import (
     QUANTIZE_DOCS_URL,
     export_formats,
     ClassMapModel,
+    NormalizedExportWrapper,
 )
 from vision_ai_platform.packages.utils import (
     LOGGER,
@@ -724,8 +725,9 @@ class Exporter(BaseExporter):
         """Export YOLO model to PaddlePaddle format."""
         from vision_ai_platform.packages.utils.export.paddle import torch2paddle
 
+        model = NormalizedExportWrapper(self.model)
         return torch2paddle(
-            model=self.model,
+            model=model,
             im=self.im,
             output_dir=str(self.file).replace(self.file.suffix, f"_paddle_model{os.sep}"),
             metadata=self.metadata,
@@ -773,8 +775,9 @@ class Exporter(BaseExporter):
         """Export YOLO model to NCNN format using PNNX https://github.com/pnnx/pnnx."""
         from vision_ai_platform.packages.utils.export.ncnn import torch2ncnn
 
+        model = NormalizedExportWrapper(self.model)
         return torch2ncnn(
-            model=self.model,
+            model=model,
             im=self.im,
             output_dir=str(self.file).replace(self.file.suffix, "_ncnn_model/"),
             quantize=self.cfg.quantize,

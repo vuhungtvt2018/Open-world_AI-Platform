@@ -29,7 +29,7 @@ def torch2paddle(
         (str): Path to the exported ``_paddle_model`` directory.
     """
     assert not IS_JETSON, "Jetson Paddle exports not supported yet"
-    from ultralytics.utils.checks import check_requirements
+    from vision_ai_platform.packages.utils.check import check_requirements
 
     check_requirements(
         (

@@ -79,6 +79,8 @@ def export_formats():
         ],
         ["PaddlePaddle", "paddle", "_paddle_model", True, True, ["batch"], "base"],
         ["NCNN", "ncnn", "_ncnn_model", True, True, ["batch", "quantize"], "ncnn"],
+        ["LiteRT", "litert", ".tflite", True, False, ["batch", "quantize", "data", "fraction"], "litert"],
+        ["MNN", "mnn", ".mnn", True, True, ["batch", "dynamic", "quantize", "opset", "simplify", "nms"], "mnn"],
     ]
     return dict(zip(["Format", "Argument", "Suffix", "CPU", "GPU", "Arguments", "Env"], zip(*x)))
 
@@ -318,6 +320,52 @@ class ExportWrapper(torch.nn.Module):
             return super().__getattr__(name)
         except AttributeError:
             return getattr(self._model, name)
+
+
+class NormalizedExportWrapper(ExportWrapper):
+    """Normalize YOLO-style outputs for X2Paddle tracing.
+
+    Some YOLO variants return dictionaries or nested lists containing tensors, for example
+    ``{"boxes": tensor, "feats": [tensor, tensor]}``. X2Paddle can choke on these mixed
+    output structures during tracing. Flattening them to a simple tuple of tensors keeps the
+    export path compatible while preserving the values needed for export.
+    """
+
+    def __init__(self, model: torch.nn.Module):
+        super().__init__(model)
+        self.names = getattr(model, "names", None)
+        self.stride = getattr(model, "stride", None)
+        self.yaml = getattr(model, "yaml", None)
+        self.args = getattr(model, "args", None)
+        self.pt_path = getattr(model, "pt_path", None)
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.model, name)
+
+    @staticmethod
+    def _flatten_outputs(value):
+        flat = []
+
+        def visit(item):
+            if isinstance(item, torch.Tensor):
+                flat.append(item)
+            elif isinstance(item, dict):
+                for child in item.values():
+                    visit(child)
+            elif isinstance(item, (list, tuple)):
+                for child in item:
+                    visit(child)
+
+        visit(value)
+        return tuple(flat)
+
+    def forward(self, x: torch.Tensor):
+        output = self._model(x)
+        flat_output = self._flatten_outputs(output)
+        return flat_output if flat_output else (x,)
 
 
 class ClassMapModel(ExportWrapper):
