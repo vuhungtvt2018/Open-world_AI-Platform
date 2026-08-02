@@ -135,8 +135,6 @@ class YOLOConfig(BaseConfig):
     split: Literal["val", "test", "train"] = Field(default="val", description="Dataset split to evaluate")
     save_json: bool = Field(default=False, description="Save COCO JSON or PNG masks for external evaluation")
     conf: Optional[float] = Field(default=0.001, ge=0.0, le=1.0, description="Confidence threshold for evaluation")
-    iou: float = Field(default=0.7, ge=0.0, le=1.0, description="IoU threshold for NMS")
-    max_det: int = Field(default=300, ge=1, description="Maximum detections per image")
     quantize: Optional[Union[int, str]] = Field(default=None, description="Precision quantization settings")
     dnn: bool = Field(default=False, description="Use OpenCV DNN for ONNX inference")
     plots: bool = Field(default=True, description="Save plots and images during evaluation")
@@ -365,6 +363,7 @@ class ExporterConfig(BaseConfig):
     
     Inherits strict extra field checking and type flexibilities from BaseConfig.
     """
+    name: Optional[str] = Field(default=None, description="Experiment name")
     format: Literal[
         "onnx", "torchscript", "engine", "openvino", "coreml", 
         "saved_model", "pb", "tflite", "edgetpu", "tfjs", 
@@ -373,6 +372,7 @@ class ExporterConfig(BaseConfig):
         default="onnx", 
         description="Target export format for deployment environment"
     )
+    split: Literal["val", "test", "train"] = Field(default="val", description="Dataset split to evaluate")
     imgsz: Union[int, Tuple[int, int], List[int]] = Field(
         default=640, 
         description="Target image size for model input (e.g., 640 or (640, 480))"
@@ -417,6 +417,11 @@ class ExporterConfig(BaseConfig):
         default=None, 
         description="Maximum workspace memory allocation in GiB for TensorRT optimization"
     )
+    conf: float = Field(default=0.25, ge=0.0, le=1.0, description="Confidence threshold for predictions")
+    max_det: int = Field(default=300, ge=1, description="Maximum number of detections per image")
+    agnostic_nms: bool = Field(default=False, description="Class-agnostic NMS")
+    iou: float = Field(default=0.7, ge=0.0, le=1.0, description="IoU threshold for NMS")
+    end2end: Optional[bool] = Field(default=None, description="Use end2end head (e.g. YOLOv10/YOLO26)")
 
     def to_ultralytics_dict(self) -> dict:
         """Converts config instance into a clean dictionary for model.export(**kwargs)."""

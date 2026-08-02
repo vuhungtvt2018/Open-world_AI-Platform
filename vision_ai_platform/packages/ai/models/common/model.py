@@ -22,7 +22,7 @@ from vision_ai_platform.packages.utils import (
 from vision_ai_platform.packages.utils.files import get_save_dir
 from vision_ai_platform.packages.ai.nn.tasks import guess_model_task, yaml_model_load, load_checkpoint
 
-class Model(BaseModel, ABC):
+class Model(BaseModel):
     def __init__(
         self,
         model: str | Path | BaseModel = "yolo26n.pt",
