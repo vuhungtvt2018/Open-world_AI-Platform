@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Optional, Tuple
 
+import cv2
 import numpy as np
 
 from vision_ai_platform.packages.workflow.base import Workflow
@@ -11,7 +12,140 @@ from vision_ai_platform.packages.core import WorkflowConfig, WorkflowResults
 from vision_ai_platform.packages.utils.annotator import colors
 
 
-class ObjectCounterWorkflow(Workflow):
+class ImageObjectCounterWorkflow(Workflow):
+    """A class to manage the counting of objects in a image.
+
+    This class extends the BaseSolution class and provides functionality for counting objects appearing
+    in an image.
+
+    Attributes:
+        counted_ids (list[int]): List of IDs of objects that have been counted.
+        classwise_count (dict[str, dict[str, int]]): Dictionary for counts, categorized by object class.
+        region_initialized (bool): Flag indicating whether the counting region has been initialized.
+        margin (int): Margin for background rectangle size to display counts properly.
+
+    Methods:
+        count_objects: Count objects within a polygonal or linear region based on their tracks.
+        display_counts: Display object counts on the frame.
+        process: Process input data and update counts.
+
+    Examples:
+        >>> counter = ImageObjectCounterWorkflow()
+        >>> frame = cv2.imread("frame.jpg")
+        >>> results = counter.process(frame)
+    """
+    def __init__(self, cfg: WorkflowConfig):
+        """Initialize the ImageObjectCounterWorkflow class for real-time object counting in video streams."""
+        super().__init__(cfg)
+
+        self.counted_ids = []  # List of IDs of objects that have been counted
+        self.classwise_count = defaultdict(int)
+        self.region_initialized = False  # Flag indicating whether the region has been initialized
+
+        self.margin = self.line_width * 2  # Scales the background rectangle size to display counts properly
+
+    def count_objects(
+        self,
+        track_id: int,
+        cls: int,
+    ) -> None:
+        """Count objects within a polygonal or linear region based on their tracks.
+
+        Args:
+            track_id (int): Unique identifier for the tracked object.
+            cls (int): Class index for classwise count updates.
+
+        Examples:
+            >>> counter = ImageObjectCounterWorkflow()
+            >>> track_id_num = 1
+            >>> class_to_count = 0  # In COCO model, class 0 = person
+            >>> counter.count_objects(track_id_num, class_to_count)
+        """
+        if track_id in self.counted_ids:
+            return
+        
+        self.classwise_count[self.names[cls]] += 1
+        self.counted_ids.append(track_id)
+
+    def display_counts(self, plot_im: np.ndarray) -> None:
+        """Display object counts on the input image.
+
+        Args:
+            plot_im (np.ndarray): The image to display counts on.
+
+        Examples:
+            >>> counter = ImageObjectCounterWorkflow()
+            >>> frame = cv2.imread("image.jpg")
+            >>> counter.display_counts(frame)
+        """
+        labels_dict = {
+            k: v for k, v in self.classwise_count.items() if v > 0
+        }
+        if labels_dict:
+            self.annotator.display_analytics(plot_im, labels_dict, (104, 31, 17), (255, 255, 255), self.margin)
+
+    def display_output(self, plot_im: np.ndarray) -> None:
+        """Display the results of the processing, which could involve showing frames, printing counts, or saving
+        results.
+
+        This method is responsible for visualizing the output of the object detection and tracking process. It displays
+        the processed frame with annotations, and allows for user interaction to close the display.
+
+        Args:
+            plot_im (np.ndarray): The image or frame that has been processed and annotated.
+
+        Examples:
+            >>> solution = BaseSolution()
+            >>> frame = cv2.imread("path/to/image.jpg")
+            >>> solution.display_output(frame)
+
+        Notes:
+            - This method will only display output if the 'show' configuration is set to True and the environment
+              supports image display.
+            - The display can be closed by pressing the 'q' key.
+        """
+        if self.cfg.show and self.env_check:
+            cv2.imshow("Vision AI Platform Workflow", plot_im)
+            if cv2.waitKey(0) & 0xFF == ord("q"):
+                cv2.destroyAllWindows()  # Closes current frame window
+                return
+    
+    def process(self, im0: np.ndarray) -> WorkflowResults:
+        """Process input data (frames or object tracks) and update object counts.
+
+        This method initializes the counting region, extracts tracks, draws bounding boxes and regions, updates object
+        counts, and displays the results on the input image.
+
+        Args:
+            im0 (np.ndarray): The input image or frame to be processed.
+
+        Returns:
+            (WorkflowResults): Contains processed image `plot_im`, 'in_count' (int, count of objects entering the
+                region), 'out_count' (int, count of objects exiting the region), 'classwise_count' (dict, per-class
+                object count), and 'total_tracks' (int, total number of tracked objects).
+        """
+        self.extract_tracks(im0)  # Extract tracks
+        self.annotator = WorkflowAnnotator(im0, line_width=self.line_width)  # Initialize annotator
+
+        # Iterate over bounding boxes, track ids and classes index
+        for box, track_id, cls, conf in zip(self.boxes, self.track_ids, self.clss, self.confs):
+            # Draw bounding box and counting region
+            self.annotator.box_label(box, label=self.adjust_box_label(cls, conf, track_id), color=colors(cls, True))
+            self.store_tracking_history(track_id, box)  # Store track history
+            self.count_objects(track_id, cls)  # object counting
+        
+        plot_im = self.annotator.result()
+        self.display_counts(plot_im)  # Display the counts on the frame
+        self.display_output(plot_im)  # Display output with base class function
+
+        return WorkflowResults(
+            plot_im=plot_im,
+            classwise_count=self.classwise_count,
+            total_tracks=len(self.track_ids),
+        )
+
+
+class VideoObjectCounterWorkflow(Workflow):
     """A class to manage the counting of objects in a real-time video stream based on their tracks.
 
     This class extends the BaseSolution class and provides functionality for counting objects moving in and out of a
@@ -33,13 +167,13 @@ class ObjectCounterWorkflow(Workflow):
         process: Process input data and update counts.
 
     Examples:
-        >>> counter = ObjectCounter()
+        >>> counter = VideoObjectCounterWorkflow()
         >>> frame = cv2.imread("frame.jpg")
         >>> results = counter.process(frame)
         >>> print(f"Inward count: {results.in_count}, Outward count: {results.out_count}")
     """
     def __init__(self, cfg: WorkflowConfig):
-        """Initialize the ObjectCounter class for real-time object counting in video streams."""
+        """Initialize the VideoObjectCounterWorkflow class for real-time object counting in video streams."""
         super().__init__(cfg)
 
         self.in_count = 0  # Counter for objects moving inward
@@ -68,7 +202,7 @@ class ObjectCounterWorkflow(Workflow):
             cls (int): Class index for classwise count updates.
 
         Examples:
-            >>> counter = ObjectCounter()
+            >>> counter = VideoObjectCounterWorkflow()
             >>> track_line = {1: [100, 200], 2: [110, 210], 3: [120, 220]}
             >>> box = [130, 230, 150, 250]
             >>> track_id_num = 1

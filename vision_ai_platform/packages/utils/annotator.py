@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from .check import check_version, is_ascii, check_font
+from vision_ai_platform.packages.utils import IS_COLAB, IS_KAGGLE, LOGGER
 
 _SPECTRAL_R_ANCHORS = np.array(
     [
@@ -654,14 +655,13 @@ class Annotator:
     def show(self, title: str | None = None):
         """Show the annotated image."""
         im = Image.fromarray(np.asarray(self.im)[..., ::-1])  # Convert BGR NumPy array to RGB PIL Image
-        # if IS_COLAB or IS_KAGGLE:  # cannot use IS_JUPYTER as it runs for all IPython environments
-        #     try:
-        #         display(im)  # noqa - display() function only available in ipython environments
-        #     except ImportError as e:
-        #         LOGGER.warning(f"Unable to display image in Jupyter notebooks: {e}")
-        # else:
-        #     im.show(title=title)
-        im.show(title=title)
+        if IS_COLAB or IS_KAGGLE:  # cannot use IS_JUPYTER as it runs for all IPython environments
+            try:
+                display(im)  # noqa - display() function only available in ipython environments
+            except ImportError as e:
+                LOGGER.warning(f"Unable to display image in Jupyter notebooks: {e}")
+        else:
+            im.show(title=title)
 
     def save(self, filename: str = "image.jpg"):
         """Save the annotated image to 'filename'."""

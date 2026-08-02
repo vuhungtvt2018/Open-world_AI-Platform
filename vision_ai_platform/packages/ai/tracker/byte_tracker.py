@@ -434,7 +434,7 @@ class BYTETracker(BaseTracker):
 
     def _format_output(self) -> List[STrack]:
         """Format and return current active track objects matching standard BaseTracker interface."""
-        return [x for x in self.tracked_stracks if x.is_activated]
+        return np.asarray([x.result for x in self.tracked_stracks if x.is_activated], dtype=np.float32)
 
     def get_kalmanfilter(self) -> Any:
         """Return initialized Kalman filter object."""

@@ -82,8 +82,7 @@ class BaseWorkflow(ABC):
         # Load Model and store additional information (classes, show_conf, show_label)
         if self.cfg.model is None:
             self.cfg.model = "yolo26n.pt"
-        self.model = None
-        self.names = self.model.names
+        self.model = None        
         self.classes = self.cfg.classes
         self.show_conf = self.cfg.show_conf
         self.show_labels = self.cfg.show_labels
@@ -213,7 +212,7 @@ class BaseWorkflow(ABC):
             - The display can be closed by pressing the 'q' key.
         """
         if self.cfg.show and self.env_check:
-            cv2.imshow("Ultralytics Solutions", plot_im)
+            cv2.imshow("Vision AI Platform Workflow", plot_im)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 cv2.destroyAllWindows()  # Closes current frame window
                 return
@@ -231,7 +230,7 @@ class BaseWorkflow(ABC):
         track_or_predict_speed = self.profilers[0].dt * 1e3
         solution_speed = (self.profilers[1].dt - self.profilers[0].dt) * 1e3  # solution time = process - track
         result.speed = {track_or_predict: track_or_predict_speed, "solution": solution_speed}
-        if self.CFG["verbose"]:
+        if self.cfg.verbose:
             self.frame_no += 1
             counts = Counter(self.clss)  # Only for logging.
             # Use model input shape (reflects imgsz) if predictor is available

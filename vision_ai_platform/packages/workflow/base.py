@@ -22,8 +22,9 @@ class Workflow(BaseWorkflow, ABC):
         check_requirements("shapely>=2.0.0")
         super().__init__(cfg)
         self.logger = LOGGER
-        self.logger.info(f"Ultralytics Solutions: ✅ {self.cfg}")
+        self.logger.info(f"Vision AI Platform Solutions: ✅ {self.cfg}")
         self.model = YOLO(self.cfg.model)
+        self.names = self.model.names
 
         self.env_check = check_imshow(warn=True)
         self.profilers = (

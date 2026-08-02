@@ -157,7 +157,7 @@ class Model(BaseModel, ABC):
                 for returning feature embeddings from specified layers.
 
         Returns:
-            (Iterator[vision_ai_platform.packages.core.results.Results | torch.Tensor] | list[vision_ai_platform.packages.core.results.Results] |
+            (Iterator[vision_ai_platform.packages.ai.models.common.results.Results | torch.Tensor] | list[vision_ai_platform.packages.ai.models.common.results.Results] |
             list[torch.Tensor]): Prediction results or embeddings, streamed when `stream=True`.
 
         Notes:
@@ -207,7 +207,7 @@ class Model(BaseModel, ABC):
             **kwargs (Any): Additional keyword arguments for configuring the tracking process.
 
         Returns:
-            (list[vision_ai_platform.packages.core.results.Results]): A list of tracking results, each a Results object.
+            (list[vision_ai_platform.packages.ai.models.common.results.Results]): A list of tracking results, each a Results object.
 
         Examples:
             >>> model = YOLO("yolo26n.pt")

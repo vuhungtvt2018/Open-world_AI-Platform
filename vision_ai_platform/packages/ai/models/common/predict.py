@@ -183,7 +183,7 @@ class Predictor(BasePredictor, ABC):
             **kwargs (Any): Additional keyword arguments for the inference method.
 
         Yields:
-            (vision_ai_platform.packages.core.results.Results): Results objects.
+            (vision_ai_platform.packages.ai.models.common.results.Results): Results objects.
         """
         self.stream = stream
         if stream:
@@ -203,7 +203,7 @@ class Predictor(BasePredictor, ABC):
             **kwargs (Any): Additional keyword arguments for the inference method.
 
         Yields:
-            (vision_ai_platform.packages.core.results.Results): Results objects.
+            (vision_ai_platform.packages.ai.models.common.results.Results): Results objects.
         """
         if self.cfg.verbose:
             LOGGER.info("")

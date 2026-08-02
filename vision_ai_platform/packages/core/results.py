@@ -700,7 +700,7 @@ class OBB(BaseResultItem):
         return self.data[:, -3] if self.is_track else None
 
     @cached_property
-    def xyxyxy(self) -> torch.Tensor | np.ndarray:
+    def xyxyxyxy(self) -> torch.Tensor | np.ndarray:
         cos, sin, cat, stack = (
             (torch.cos, torch.sin, torch.cat, torch.stack)
             if isinstance(self.xywhr, torch.Tensor)
