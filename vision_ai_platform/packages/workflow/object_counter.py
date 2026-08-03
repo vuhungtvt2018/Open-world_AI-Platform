@@ -15,7 +15,7 @@ from vision_ai_platform.packages.utils.annotator import colors
 class ImageObjectCounterWorkflow(Workflow):
     """A class to manage the counting of objects in a image.
 
-    This class extends the BaseSolution class and provides functionality for counting objects appearing
+    This class extends the Workflow class and provides functionality for counting objects appearing
     in an image.
 
     Attributes:

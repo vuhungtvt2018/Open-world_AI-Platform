@@ -79,7 +79,7 @@ class ConsoleLogger:
         # Hook logger
         try:
             self._log_handler = self._LogHandler(self._queue_log)
-            logging.getLogger("ultralytics").addHandler(self._log_handler)
+            logging.getLogger("vision_ai_platform").addHandler(self._log_handler)
         except Exception:
             pass
 
@@ -100,7 +100,7 @@ class ConsoleLogger:
         # Remove logging handler to prevent memory leak
         if self._log_handler:
             try:
-                logging.getLogger("ultralytics").removeHandler(self._log_handler)
+                logging.getLogger("vision_ai_platform").removeHandler(self._log_handler)
             except Exception:
                 pass
             self._log_handler = None

@@ -21,3 +21,6 @@ yt_dlp
 faster-coco-eval
 pi-heif
 shapely
+fastapi[standard]
+uvicorn
+python-multipart
