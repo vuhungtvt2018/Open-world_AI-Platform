@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from vision_ai_platform import __version__
-from vision_ai_platform.packages.core import YOLOConfig, ExporterConfig, BaseExporter
+from vision_ai_platform.packages.core import YOLOConfig, BaseExporter
 from vision_ai_platform.packages.core.exporter import (
     FP16_FORMATS,
     INT8_FORMATS,
@@ -140,7 +140,7 @@ def try_export(inner_func):
 
 
 class Exporter(BaseExporter):
-    def __init__(self, cfg: ExporterConfig, _callbacks: dict | None = None):
+    def __init__(self, cfg: YOLOConfig, _callbacks: dict | None = None):
         """Initialize the Exporter class.
 
         Args:
@@ -488,7 +488,7 @@ class Exporter(BaseExporter):
     def get_int8_calibration_dataloader(self, prefix=""):
         """Build and return a dataloader for calibration of INT8 models."""
         LOGGER.info(f"{prefix} collecting INT8 calibration images from 'data={self.cfg.data}'")
-        cfg = YOLOConfig(**self.cfg.to_ultralytics_dict())
+        cfg = self.cfg.model_copy()
         cfg.imgsz = max(self.imgsz)
         if self.model.task == "classify":
             import torchvision.transforms as T  # scope for faster 'import ultralytics'
@@ -974,16 +974,16 @@ class Exporter(BaseExporter):
 class NMSModel(torch.nn.Module):
     """Model wrapper with embedded NMS for Detect, Segment, Pose and OBB."""
 
-    def __init__(self, model: nn.Module, args: ExporterConfig):
+    def __init__(self, model: nn.Module, cfg: YOLOConfig):
         """Initialize the NMSModel.
 
         Args:
             model (torch.nn.Module): The model to wrap with NMS postprocessing.
-            args (ExporterConfig): The export arguments.
+            cfg (YOLOConfig): The export arguments.
         """
         super().__init__()
         self.model = model
-        self.cfg = args
+        self.cfg = cfg
         self.obb = model.task == "obb"
         self.is_tf = self.cfg.format == "saved_model"
 

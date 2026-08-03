@@ -6,7 +6,7 @@ from typing import Any, Iterator
 import numpy as np
 import torch
 
-from vision_ai_platform.packages.core import BaseModel, YOLOConfig, ExporterConfig
+from vision_ai_platform.packages.core import BaseModel, YOLOConfig
 from vision_ai_platform.packages.ai.models.common.results import Results
 from vision_ai_platform.packages.utils import (
     LOGGER,
@@ -367,7 +367,7 @@ class Model(BaseModel):
             "verbose": False,
         }  # method defaults
         args = {**self.overrides, **custom, **kwargs, "mode": "export"}  # highest priority args on the right
-        export_cfg = ExporterConfig().model_copy(update=args)
+        export_cfg = self.model.cfg.model_copy(update=args)
         return Exporter(cfg=export_cfg, _callbacks=self.callbacks)(model=self.model)
 
     @property

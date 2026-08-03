@@ -15,7 +15,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from .config import ExporterConfig
+from .config import YOLOConfig
 
 def export_formats():
     """Return a dictionary of Ultralytics YOLO export formats."""
@@ -146,7 +146,7 @@ class BaseExporter(ABC):
     process for each supported format.
 
     Attributes:
-        cfg (ExporterConfig): Configuration arguments for the exporter.
+        cfg (YOLOConfig): Configuration arguments for the exporter.
         callbacks (dict): Dictionary of callback functions for different export events.
         im (torch.Tensor): Input tensor for model inference during export.
         model (torch.nn.Module): The YOLO model to be exported.
@@ -185,11 +185,11 @@ class BaseExporter(ABC):
         >>> exporter(model="yolo26n.pt")
     """
 
-    def __init__(self, cfg: ExporterConfig, _callbacks: dict | None = None):
+    def __init__(self, cfg: YOLOConfig, _callbacks: dict | None = None):
         """Initialize the Exporter class.
 
         Args:
-            cfg (ExporterConfig): Configuration object.
+            cfg (YOLOConfig): Configuration object.
             _callbacks (dict, optional): Dictionary of callback functions.
         """
         self.cfg = cfg

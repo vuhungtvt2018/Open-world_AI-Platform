@@ -3,7 +3,6 @@ from .config import (
     AppConfig,
     YOLOConfig,
     TrackerConfig,
-    ExporterConfig,
     HardwareConfig,
     WorkflowConfig,
 )
@@ -25,7 +24,6 @@ __all__ = [
     "TrackerConfig",
     "AppConfig",
     "HardwareConfig",
-    "ExporterConfig",
     "WorkflowConfig",
     "BasePredictor",
     "BaseValidator",
