@@ -1,0 +1,7 @@
+- `[x]` 1. Implement Edge Analytics API
+  - `[x]` Add `GET /api/analytics` to `1_edge_node/edge/apps/edge-agent/web_backend.py`.
+- `[x]` 2. Update Frontend Code
+  - `[x]` Modify `0_frontend/src/pages/Analytics.tsx` to use `VITE_EDGE_API_URL`.
+- `[x]` 3. Verification
+  - `[x]` Ensure Edge Server runs without syntax errors.
+  - `[x]` Verify frontend analytics load correctly.

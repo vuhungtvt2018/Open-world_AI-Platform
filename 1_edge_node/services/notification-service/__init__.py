@@ -1,0 +1,1 @@
+"""Notification and alerting microservice."""

@@ -1,0 +1,21 @@
+[project]
+name = "ai"
+version = "0.1.0"
+description = "AI modules and engineering tools"
+requires-python = ">=3.10"
+dependencies = [
+    "core",
+    "utils",
+    "camera",
+    "ultralytics",
+    "anomalib",
+    "opencv-python",
+    "numpy",
+    "torch",
+    "torchvision"
+]
+
+[tool.uv.sources]
+core = { workspace = true }
+utils = { workspace = true }
+camera = { workspace = true }

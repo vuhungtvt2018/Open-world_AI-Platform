@@ -1,0 +1,1 @@
+"""Annotation adapter app."""

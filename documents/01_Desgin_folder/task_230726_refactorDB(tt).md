@@ -1,0 +1,10 @@
+- `[x]` 1. Update Configuration
+  - `[x]` Add `API_SYNC_LIBRARY_DOWN_URL` to `2_sync_services/config.yaml`.
+- `[x]` 2. Server API Implementation
+  - `[x]` Add `GET /api/sync/library/down` endpoint to `3_cloud_server/defect_embedding/main.py`.
+- `[x]` 3. Edge Worker Logic
+  - `[x]` Modify `2_sync_services/data_sync_worker.py` to create `qc_product_photo_library` table in SQLite.
+  - `[x]` Fetch `last_library_sync_time` and call the new API.
+  - `[x]` Upsert records into SQLite and update `last_library_sync_time`.
+- `[x]` 4. Verification
+  - `[x]` Ensure Server and Edge Worker run without syntax errors.

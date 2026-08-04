@@ -1,0 +1,25 @@
+[project]
+name = "edge-agent"
+version = "0.1.0"
+description = "Edge Agent FastAPI Web Backend"
+requires-python = ">=3.10"
+dependencies = [
+    "core",
+    "utils",
+    "camera",
+    "workflow",
+    "services",
+    "fastapi",
+    "uvicorn",
+    "python-multipart",
+    "psutil",
+    "opencv-python",
+    "numpy"
+]
+
+[tool.uv.sources]
+core = { workspace = true }
+utils = { workspace = true }
+camera = { workspace = true }
+workflow = { workspace = true }
+services = { workspace = true }

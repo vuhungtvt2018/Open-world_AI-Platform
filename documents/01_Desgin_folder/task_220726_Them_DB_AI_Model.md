@@ -1,0 +1,5 @@
+- `[x]` Create AIModel table in `services/database/models.py`
+- `[x]` Ensure database tables are created (migration/init)
+- `[x]` Add seed logic in `web_backend.py` to populate AIModel table
+- `[x]` Update `/model-registry` API to query AIModel
+- `[x]` Verify API returns correct data format
