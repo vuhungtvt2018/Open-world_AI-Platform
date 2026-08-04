@@ -1,5 +1,0 @@
-- `[x]` Create `CloudAIModel` and `CloudInspectionRecord` in `3_cloud_server/defect_embedding/models.py`
-- `[x]` Add `GET /api/models/latest` API on Cloud Server (`main.py`)
-- `[x]` Add `POST /api/dataset/sync` API on Cloud Server (`main.py`)
-- `[x]` Add `/api/sync/models-down` API on Edge Node (`web_backend.py`)
-- `[x]` Add `/api/sync/dataset-up` API on Edge Node (`web_backend.py`)
