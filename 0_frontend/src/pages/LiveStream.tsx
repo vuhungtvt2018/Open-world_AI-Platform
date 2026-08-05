@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Camera, 
   Maximize2, 
@@ -13,16 +13,53 @@ import {
 } from 'lucide-react';
 import './LiveStream.css';
 
-const cameras = [
-  { id: 1, name: 'Main Intake - CAM 01', status: 'online', resolution: '1920x1080', fps: 30, bitrate: '4.2 Mbps' },
-  { id: 2, name: 'Quality Station - CAM 02', status: 'online', resolution: '1920x1080', fps: 28, bitrate: '3.8 Mbps' },
-  { id: 3, name: 'Packing Line - CAM 03', status: 'online', resolution: '1280x720', fps: 25, bitrate: '2.1 Mbps' },
-  { id: 4, name: 'Storage Exit - CAM 04', status: 'online', resolution: '1280x720', fps: 25, bitrate: '1.9 Mbps' },
+const API_BASE_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000';
+
+const initialCameras = [
+  { id: 1, name: 'Main Intake - CAM 01', status: 'online', resolution: '1920x1080', fps: 30, bitrate: '4.2 Mbps', streamType: 'Basler' },
+  { id: 2, name: 'Quality Station - CAM 02', status: 'online', resolution: '1920x1080', fps: 28, bitrate: '3.8 Mbps', streamType: 'RTSP' },
+  { id: 3, name: 'Packing Line - CAM 03', status: 'offline', resolution: '1280x720', fps: 25, bitrate: '2.1 Mbps', streamType: 'None' },
+  { id: 4, name: 'Storage Exit - CAM 04', status: 'offline', resolution: '1280x720', fps: 25, bitrate: '1.9 Mbps', streamType: 'None' },
 ];
 
 export default function LiveStream() {
-  const [selectedCam, setSelectedCam] = useState(cameras[0]);
+  const [cameras, setCameras] = useState(initialCameras);
+  const [selectedCamId, setSelectedCamId] = useState(1);
   const [isRecording, setIsRecording] = useState(false);
+
+  const selectedCam = cameras.find(c => c.id === selectedCamId) || cameras[0];
+
+
+  useEffect(() => {
+    // Initialize all cameras concurrently
+    const initCameras = async () => {
+      for (const cam of cameras) {
+        if (cam.streamType === 'None') continue;
+        const mode = cam.streamType === 'Basler' ? 'basler' : 'stream';
+        try {
+          await fetch(`${API_BASE_URL}/set-mode/${mode}?cam=${cam.id}`, { method: 'POST' });
+        } catch (err) {
+          console.error(`Failed to initialize CAM ${cam.id}`, err);
+        }
+      }
+    };
+    initCameras();
+  }, []); // Run once on mount
+
+  const updateStreamType = async (type: string) => {
+    // Update local state
+    setCameras(cams => cams.map(c => 
+      c.id === selectedCamId ? { ...c, streamType: type } : c
+    ));
+    
+    // Update backend for this specific camera
+    const mode = type === 'Basler' ? 'basler' : 'stream';
+    try {
+      await fetch(`${API_BASE_URL}/set-mode/${mode}?cam=${selectedCamId}`, { method: 'POST' });
+    } catch (err) {
+      console.error(`Failed to switch mode for CAM ${selectedCamId}`, err);
+    }
+  };
 
   return (
     <div className="livestream-container">
@@ -47,24 +84,23 @@ export default function LiveStream() {
         <div className="stream-main">
           <div className="active-stream-window glass-panel">
             <div className="stream-viewport">
-              <div className="stream-placeholder">
-                <div className="stream-watermark">
-                  <span className="live-badge">LIVE</span>
-                  <span className="cam-name">{selectedCam.name}</span>
-                </div>
-                
-                {/* Simulated AI Overlays */}
-                <div className="ai-overlay">
-                  <div className="detection-box" style={{ top: '20%', left: '30%', width: '150px', height: '100px' }}>
-                    <span className="box-label">BOLT_OK 98%</span>
+                <div className="stream-placeholder" style={{ padding: 0, position: 'relative', overflow: 'hidden' }}>
+                  <div className="stream-watermark" style={{ zIndex: 10 }}>
+                    <span className="live-badge">LIVE - {selectedCam.streamType}</span>
+                    <span className="cam-name">{selectedCam.name}</span>
                   </div>
-                  <div className="detection-box ng" style={{ top: '50%', left: '60%', width: '120px', height: '90px' }}>
-                    <span className="box-label">BOLT_NG 92% - SURFACE</span>
-                  </div>
+                  
+                  <img 
+                    key={`main-${selectedCam.id}-${selectedCam.streamType}`}
+                    src={`${API_BASE_URL}/video-feed?cam=${selectedCam.id}&mode=${selectedCam.streamType}`} 
+                    alt="Live Stream" 
+                    className="result-image" 
+                    style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFjaXR5PSIwLjUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5ObyBTdHJlYW0gQ29ubmVjdGlvbjwvdGV4dD48L3N2Zz4=';
+                    }}
+                  />
                 </div>
-
-                <Monitor size={64} className="placeholder-icon opacity-10" />
-              </div>
               
               <div className="stream-controls">
                 <div className="control-group">
@@ -75,6 +111,18 @@ export default function LiveStream() {
                   <button className="control-btn"><Video size={16} /> Capture Frame</button>
                 </div>
                 <div className="control-group">
+                  <div className="mode-selector" style={{ background: 'rgba(0,0,0,0.5)', padding: '2px', borderRadius: '6px', display: 'flex', gap: '4px' }}>
+                    <button 
+                      className={`mode-btn ${selectedCam.streamType === 'RTSP' ? 'active' : ''}`}
+                      onClick={() => updateStreamType('RTSP')}
+                      style={{ padding: '4px 8px', fontSize: '11px', minWidth: '80px', border: 'none', background: selectedCam.streamType === 'RTSP' ? 'var(--primary)' : 'transparent', color: 'white', borderRadius: '4px', cursor: 'pointer' }}
+                    >RTSP</button>
+                    <button 
+                      className={`mode-btn ${selectedCam.streamType === 'Basler' ? 'active' : ''}`}
+                      onClick={() => updateStreamType('Basler')}
+                      style={{ padding: '4px 8px', fontSize: '11px', minWidth: '80px', border: 'none', background: selectedCam.streamType === 'Basler' ? 'var(--primary)' : 'transparent', color: 'white', borderRadius: '4px', cursor: 'pointer' }}
+                    >Basler</button>
+                  </div>
                   <button className="icon-btn" title="Settings"><Settings size={18} /></button>
                   <button className="icon-btn" title="Fullscreen"><Maximize2 size={18} /></button>
                 </div>
@@ -106,18 +154,25 @@ export default function LiveStream() {
               <div 
                 key={cam.id} 
                 className={`grid-item glass-panel ${selectedCam.id === cam.id ? 'active' : ''}`}
-                onClick={() => setSelectedCam(cam)}
+                onClick={() => setSelectedCamId(cam.id)}
               >
-                <div className="grid-preview">
-                  <Camera size={24} className="opacity-20" />
-                  <div className="grid-status-badge">
+                <div className="grid-preview" style={{ padding: 0, position: 'relative', overflow: 'hidden' }}>
+                  <img 
+                    src={`${API_BASE_URL}/video-feed?cam=${cam.id}&mode=${cam.streamType}`}
+                    alt={cam.name}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMzMzMiLz48L3N2Zz4=';
+                    }}
+                  />
+                  <div className="grid-status-badge" style={{ position: 'absolute', bottom: '8px', left: '8px', zIndex: 10 }}>
                     <div className="status-dot online"></div>
                     <span>CAM 0{cam.id}</span>
                   </div>
                 </div>
                 <div className="grid-info">
                   <span className="name">{cam.name}</span>
-                  <span className="meta">{cam.resolution} • {cam.fps} FPS</span>
+                  <span className="meta">{cam.resolution} • {cam.fps} FPS • {cam.streamType}</span>
                 </div>
               </div>
             ))}

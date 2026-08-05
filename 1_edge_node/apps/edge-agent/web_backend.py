@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 # Import logic (New DAG Architecture)
 from packages.core.config import AppConfig
 from packages.workflow.pipeline import Pipeline
-from packages.camera import RTSP_Threaded_Camera
+from packages.camera import RTSP_Threaded_Camera, Basler_Threaded_Camera
 from packages.utils.utils import (ts, union_box, pad_and_clip_box, 
                      arrow_angle, rotate_image, transform_points, need_clean, clean_data)
 from packages.utils.visualize import concat_anomaly_crops
@@ -107,23 +107,34 @@ class WebInference:
         self.cfg = config
         self.pipeline = Pipeline(config)
         
-        # Khởi tạo Camera Stream
-        self.cam = None
-        self.input_mode = "folder" # Hoặc "stream"
+        # Khởi tạo Multi-Camera Stream
+        self.cameras = {} # id -> Camera_Instance
+        self.input_mode = {} # id -> "stream", "basler", "folder"
         self.current_frame = None
         self.current_image_name = "in_memory_image"
         
-    def set_input_mode(self, mode: str):
-        self.input_mode = mode
-        if mode == "stream" and self.cam is None:
-            self.cam = RTSP_Threaded_Camera(self.cfg.RTSP_URL, width=self.cfg.CAM_WIDTH, height=self.cfg.CAM_HEIGHT)
-        elif mode == "folder" and self.cam is not None:
-            self.cam.stop()
-            self.cam = None
+    def set_camera_mode(self, cam_id: str, mode: str):
+        if self.input_mode.get(cam_id) == mode:
+            return
+            
+        if cam_id in self.cameras and self.cameras[cam_id] is not None:
+            self.cameras[cam_id].stop()
+            self.cameras.pop(cam_id)
+            
+        self.input_mode[cam_id] = mode
+        
+        if mode == "stream":
+            rtsp_val = self.cfg.RTSP_URL
+            if str(rtsp_val).isdigit():
+                rtsp_val = int(rtsp_val)
+            self.cameras[cam_id] = RTSP_Threaded_Camera(rtsp_val, width=self.cfg.CAM_WIDTH, height=self.cfg.CAM_HEIGHT)
+        elif mode == "basler":
+            from packages.camera.basler import Basler_Threaded_Camera
+            self.cameras[cam_id] = Basler_Threaded_Camera(width=self.cfg.CAM_WIDTH, height=self.cfg.CAM_HEIGHT)
 
-    def get_frame(self):
-        if self.input_mode == "stream" and self.cam is not None:
-            frame = self.cam.read()
+    def get_frame(self, cam_id: str = "default"):
+        if self.input_mode.get(cam_id) in ["stream", "basler"] and cam_id in self.cameras:
+            frame = self.cameras[cam_id].read()
             return frame
         else:
             # Lấy ảnh trực tiếp từ RAM (không đọc ổ cứng)
@@ -131,8 +142,8 @@ class WebInference:
                 return None
             return self.current_frame.copy()
 
-    def run_inspect(self):
-        frame = self.get_frame()
+    def run_inspect(self, cam_id: str = "default"):
+        frame = self.get_frame(cam_id)
         if frame is None:
             return {"status": "error", "message": "No input frame available"}
             
@@ -407,10 +418,10 @@ async def upload_image(file: UploadFile = File(...)):
     return {"filename": dynamic_name, "images": [dynamic_name]}
 
 @app.get("/video-feed")
-async def video_feed():
+async def video_feed(cam: str = "default"):
     def gen_frames():
         while True:
-            frame = inference_engine.get_frame()
+            frame = inference_engine.get_frame(cam)
             if frame is not None:
                 ret, buffer = cv2.imencode('.jpg', frame)
                 if not ret:
@@ -443,13 +454,18 @@ async def set_image(filename: str):
     return {"message": "In-memory mode does not support switching past uploads"}
 
 @app.post("/set-mode/{mode}")
-async def set_mode(mode: str):
-    inference_engine.set_input_mode(mode)
-    return {"message": f"Input mode set to {mode}"}
+async def set_mode(mode: str, cam: str = "default"):
+    try:
+        inference_engine.set_camera_mode(cam, mode)
+        return {"message": f"Input mode for {cam} set to {mode}"}
+    except Exception as e:
+        from fastapi import HTTPException
+        print(f"Error setting mode: {e}")
+        raise HTTPException(status_code=500, detail=f"Camera Error: {str(e)}")
 
 @app.post("/inspect")
-async def trigger_inspect():
-    return inference_engine.run_inspect()
+async def trigger_inspect(cam: str = "default"):
+    return inference_engine.run_inspect(cam)
 
 @app.get("/history")
 async def get_history():

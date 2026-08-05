@@ -8,7 +8,7 @@ export default function VisionInspection() {
   const [isInspecting, setIsInspecting] = useState(false);
   const [latestResult, setLatestResult] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
-  const [inputMode, setInputMode] = useState<'folder' | 'stream'>('folder');
+  const [inputMode, setInputMode] = useState<'folder' | 'stream' | 'basler'>('folder');
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [selectedImage, setSelectedImage] = useState<string>('');
 
@@ -40,12 +40,17 @@ export default function VisionInspection() {
     fetchImages();
   }, []);
 
-  const handleModeChange = async (mode: 'folder' | 'stream') => {
+  const handleModeChange = async (mode: 'folder' | 'stream' | 'basler') => {
     try {
-      await fetch(`${API_BASE_URL}/set-mode/${mode}`, { method: 'POST' });
+      const targetCam = mode === 'basler' ? '1' : 'default';
+      const response = await fetch(`${API_BASE_URL}/set-mode/${mode}?cam=${targetCam}`, { method: 'POST' });
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed');
+      }
       setInputMode(mode);
-    } catch (error) {
-      alert('Failed to change input mode');
+    } catch (error: any) {
+      alert(`Failed to change input mode: ${error.message}`);
     }
   };
 
@@ -83,7 +88,8 @@ export default function VisionInspection() {
   const handleInspect = async () => {
     setIsInspecting(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/inspect`, { method: 'POST' });
+      const targetCam = inputMode === 'basler' ? '1' : 'default';
+      const response = await fetch(`${API_BASE_URL}/inspect?cam=${targetCam}`, { method: 'POST' });
       const result = await response.json();
       setLatestResult(result);
       fetchHistory();
@@ -107,10 +113,10 @@ export default function VisionInspection() {
               <ImageIcon size={14} /> Folder Mode
             </button>
             <button 
-              className={`mode-btn ${inputMode === 'stream' ? 'active' : ''}`}
-              onClick={() => handleModeChange('stream')}
+              className={`mode-btn ${inputMode === 'basler' ? 'active' : ''}`}
+              onClick={() => handleModeChange('basler')}
             >
-              <Play size={14} /> Stream Mode
+              <Play size={14} /> Basler Camera
             </button>
           </div>
         </div>
@@ -132,7 +138,7 @@ export default function VisionInspection() {
                 <span className="text-xs font-bold uppercase tracking-wider text-muted">1. Input Source</span>
               </div>
               <div className="image-display">
-                {inputMode === 'stream' ? (
+                {inputMode === 'stream' || inputMode === 'basler' ? (
                   <img src={`${API_BASE_URL}/video-feed`} alt="Live stream" className="result-image" />
                 ) : selectedImage ? (
                   <img src={`${API_BASE_URL}/images/${selectedImage}`} alt="Selected input" className="result-image" />

@@ -10,3 +10,4 @@ torchvision
 tqdm
 sqlalchemy
 fastapi
+pypylon
