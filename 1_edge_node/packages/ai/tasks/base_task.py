@@ -14,6 +14,18 @@ class BoundingBox(BaseModel):
     class_id: int
     class_name: Optional[str] = None
 
+class BoudingBoxOBB(BaseModel):
+    """
+    05082026 - KIET -Chuẩn hóa dữ liệu cho OBB
+    """
+    cx: float
+    cy: float
+    weight: float
+    height: float
+    phi: float
+    confidence: float
+    class_id: int
+    class_name: Optional[str] = None
 
 class InferenceResult(BaseModel):
     """Chuẩn hóa cấu trúc kết quả trả về từ mọi model AI"""
