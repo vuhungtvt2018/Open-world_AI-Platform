@@ -53,3 +53,10 @@ class YOLODetector(BaseVisionTask):
             
         result.raw_output = raw_output
         return result
+
+from packages.ai.tasks.detection.core_task import DetectionTask
+
+__all__ = [
+    "YOLODetector",
+    "DetectionTask",
+]

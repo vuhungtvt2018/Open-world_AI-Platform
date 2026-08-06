@@ -28,7 +28,7 @@ class BoundingBox(BaseModel):
 
         return x_center, y_center
 
-class OrientBoundingBox(BaseModel):
+class OrientedBoundingBox(BaseModel):
     """
     05082026 - KIET - Chuẩn hóa orient bounding box theo định dạng XYWHR.
     """
@@ -38,7 +38,7 @@ class OrientBoundingBox(BaseModel):
     width: float
     height: float
     angle: float
-    polygol: list[list[float]] = Field(default_factory = list)
+    polygon: list[list[float]] = Field(default_factory = list)
 
     @property
     def center(self):
@@ -57,8 +57,8 @@ class Prediction(BaseModel):
     class_name: Optional[str] = None
     confidence: float
     bbox: BoundingBox | None = None
-    obb: OrientBoundingBox | None = None 
-    track_id = int | None = None
+    obb: OrientedBoundingBox | None = None 
+    track_id: int | None = None
 
 
     @property
@@ -75,7 +75,7 @@ class Prediction(BaseModel):
         return None
 
 
-class InterfaceResult(BaseModel):
+class InferenceResult(BaseModel):
     """
     05082026 - KIET - Chuẩn hóa kết quả trả về từ model.
     """

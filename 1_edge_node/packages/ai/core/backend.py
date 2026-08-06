@@ -1,5 +1,6 @@
 
 from abc import ABC, abstractmethod
+import numpy as np
 
 class BaseBackend(ABC):
     """
@@ -16,7 +17,7 @@ class BaseBackend(ABC):
         """
         raise NotImplementedError
 
-    def predict(self):
+    def predict(self, image: np.ndarray):
         """
         05082026 - KIET - run interface và trả raw output
         """
