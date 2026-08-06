@@ -1,9 +1,26 @@
 import yaml
 from dataclasses import dataclass
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+from pathlib import Path
 
+"""
+06082026 - KHAI - Create base class for configuration
+"""
 @dataclass
-class AppConfig:
+@abstractmethod
+class BaseConfig(ABC):
+    """Base class for configuration, allowing for importing from YAML file"""
+    @staticmethod
+    @abstractmethod
+    def from_yaml(path: str | Path) -> "BaseConfig":
+        raise NotImplementedError()
+
+"""
+06082026 - KHAI - Make AppConfig subclass of BaseConfig
+"""
+@dataclass
+class AppConfig(BaseConfig):
     # ===== Required (NO defaults) - must come first =====
     RTSP_URL: str
     CAPTURE_DIR: str
@@ -71,7 +88,8 @@ class AppConfig:
     DISK_CLEANUP_INTERVAL_HOURS: float = 24.0
 
     @staticmethod
-    def from_yaml(path: str) -> "AppConfig":
+    def from_yaml(path: str | Path) -> "AppConfig":
+        path = str(Path(path))
         with open(path, "r", encoding="utf-8") as f:
             raw: Dict[str, Any] = yaml.safe_load(f)
         return AppConfig(
@@ -140,4 +158,39 @@ class AppConfig:
             # === Automatic Disk Cleanup ===
             DISK_CLEANUP_DAYS = float(raw.get("DISK_CLEANUP_DAYS", 15.0)),
             DISK_CLEANUP_INTERVAL_HOURS = float(raw.get("DISK_CLEANUP_INTERVAL_HOURS", 24.0))
+        )
+
+"""
+06082026 - KHAI - Move AnomalyConfig from 1_edge_node\packages\ai\tasks\anomaly\__init__.py to 1_edge_node\packages\core\config.py; make it a subclass of BaseConfig
+"""
+@dataclass
+class AnomalyConfig(BaseConfig):
+    input_size: int
+    score_thres: float
+    inside_overlap_min: float
+    min_area_ratio: float
+    bbox_pad_ratio: float
+    save_all: bool
+    show_all_boxes: bool
+    amap_threshold: float = 0.7
+    redo_center_crop: bool = True
+    center_crop: int = 448
+
+    @staticmethod
+    def from_yaml(path: str) -> "AnomalyConfig":
+        path = str(Path(path))
+        with open(path, "r", encoding="utf-8") as f:
+            raw: Dict[str, Any] = yaml.safe_load(f)
+
+        return AnomalyConfig(
+            input_size=int(raw.get("ANOMALY_INPUT_SIZE", 256)),
+            score_thres=float(raw.get("ANOMALY_SCORE_THRESHOLD", 0.5)),
+            inside_overlap_min=float(raw.get("ANOMALY_INSIDE_OVERLAP_MIN", 0.0)),
+            min_area_ratio=float(raw.get("ANOMALY_MIN_AREA_RATIO", 1e-3)),
+            bbox_pad_ratio=float(raw.get("ANOMALY_BBOX_PAD_RATIO", 0.02)),
+            save_all=bool(raw.get("SAVE_ALL_ANOMALIES"), False),
+            show_all_boxes=bool(raw.get("SHOW_ALL_ANOMALY_BOXES", False)),
+            amap_threshold=float(raw.get("ANOMALY_AMAP_THRESHOLD", 0.7)),
+            redo_center_crop=bool(raw.get("REDO_CENTER_CROP", False)),
+            center_crop=bool(raw.get("CENTER_CROP", 448)),
         )

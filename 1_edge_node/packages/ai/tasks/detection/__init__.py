@@ -2,6 +2,7 @@
 import numpy as np
 from typing import Any, Dict
 from ultralytics import YOLO
+from packages.core.config import AppConfig
 from packages.ai.tasks.base_task import BaseVisionTask, InferenceResult, BoundingBox
 
 class YOLODetector(BaseVisionTask):

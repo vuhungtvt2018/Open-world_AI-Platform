@@ -20,6 +20,9 @@ from packages.utils.utils import (ensure_dirs, compute_iou)
 from packages.ai.tasks.detection import YOLODetector
 from packages.ai.tasks.anomaly import AnomalyInferencer, AnomalyConfig
 
+"""
+06082026 - KHAI - Refactor code to adhere to modified AnomalyInferencer
+"""
 class Pipeline:
     def __init__(self, cfg: AppConfig):
         self.cfg = cfg
@@ -71,7 +74,7 @@ class Pipeline:
         print("[PIPELINE] Khởi động Anomalib (warmup)...")
         dummy_img = np.zeros((self.cfg.ANOMALY_INPUT_SIZE, self.cfg.ANOMALY_INPUT_SIZE, 3), dtype=np.uint8)
         dummy_mask = np.ones((self.cfg.ANOMALY_INPUT_SIZE, self.cfg.ANOMALY_INPUT_SIZE), dtype=np.uint8)
-        self.anomaly.run_on_crop(dummy_img, dummy_mask)
+        self.anomaly.run(dummy_img, dummy_mask)
         print("[PIPELINE] Sẵn sàng!")
 
     def match_objects(self, kp_objs: List[Dict], seg_objs: List[Dict], iou_thresh: float = 0.5):
@@ -105,7 +108,7 @@ class Pipeline:
                     seg_used.add(best_seg_idx)
         return matched
 
-    def _format_inspection_time(self, timestamp_str: str) -> str:
+    def format_inspection_time(self, timestamp_str: str) -> str:
         """Chuyển đổi chuỗi YYYYMMDD_HHMMSS_ffffff thành YYYY-MM-DD HH:MM:SS"""
         try:
             dt = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S_%f")
@@ -113,7 +116,7 @@ class Pipeline:
         except:
             return timestamp_str
 
-    def _classify_defect(self, image_path: str) -> Optional[Dict]:
+    def classify_defect(self, image_path: str) -> Optional[Dict]:
         """Gọi API phân loại lỗi ngoài và trả về nhãn lỗi + similarity."""
         if not self.cfg.DEFECT_CLS_ENABLE:
             return None
@@ -135,7 +138,7 @@ class Pipeline:
                 return None
             res_json = resp.json()
             if not isinstance(res_json, list) or len(res_json) == 0:
-                    return None
+                return None
             rec = res_json[0]
             dist = float(rec.get("distance", 1.0))
             metric = str(self.cfg.DEFECT_CLS_METRIC).lower()

@@ -102,6 +102,9 @@ SYNC_DEFECT_IMAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), 
 os.makedirs(SYNC_DEFECT_IMAGE_DIR, exist_ok=True)
 app.mount("/sync_images", StaticFiles(directory=SYNC_DEFECT_IMAGE_DIR), name="sync_images")
 
+"""
+06082026 - KHAI - Refactor code to adhere to modified Pipeline
+"""
 class WebInference:
     def __init__(self, config):
         self.cfg = config
@@ -152,7 +155,7 @@ class WebInference:
             
         H, W = frame.shape[:2]
         name = ts()
-        insp_time_str = self.pipeline._format_inspection_time(name)
+        insp_time_str = self.pipeline.format_inspection_time(name)
         
         # Lưu ảnh gốc
         orig_path = os.path.join(self.pipeline.dir_original, f"IMG_{name}.jpg")
@@ -242,7 +245,7 @@ class WebInference:
                 cv2.imwrite(crop_path, crop)
 
                 # Anomaly Detection
-                out = self.pipeline.anomaly.run_on_crop(crop, crop_mask)
+                out = self.pipeline.anomaly.run(crop, crop_mask)
                 is_ng = bool(out.get("is_ng", False))
                 
                 # Visualization tiles
@@ -275,7 +278,7 @@ class WebInference:
                             cv2.imwrite(anom_path, anom_crop)
                             
                             # Gọi API phân loại của pipeline
-                            cls_res = self.pipeline._classify_defect(anom_path)
+                            cls_res = self.pipeline.classify_defect(anom_path)
                             if cls_res is not None:
                                 label = cls_res.get("label", "NG")
                                 sim = float(cls_res.get("similarity", 0.0))
