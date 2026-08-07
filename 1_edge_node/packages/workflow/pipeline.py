@@ -64,10 +64,13 @@ class Pipeline:
             redo_center_crop=self.cfg.REDO_CENTER_CROP,
             center_crop=self.cfg.CENTER_CROP
         )
+        """
+        07082026 - KHAI - Change parameter name (refactoring)
+        """
         self.anomaly = AnomalyInferencer(
             model_path=self.cfg.ANOMALY_MODEL_PATH,
             device=self.cfg.ANOMALY_DEVICE,
-            cfg=anom_cfg
+            config=anom_cfg,
         )
         
         # Thử tải mô hình vào bộ nhớ (warmup)

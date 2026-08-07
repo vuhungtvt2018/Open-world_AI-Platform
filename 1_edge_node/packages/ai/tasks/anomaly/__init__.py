@@ -16,25 +16,27 @@ from packages.ai.tasks.base_task import BaseVisionTask, InferenceResult, Boundin
 """
 class AnomalyInferencer(BaseVisionTask):
     def __init__(self, model_path: str, device: str, config: AnomalyConfig | Dict[str, Any] | None):
-        super().__init__(model_path, device, config)
-        if isinstance(self.config, AnomalyConfig):
-            self.input_size = getattr(self.config, "input_size", 256)
-            self.save_all = getattr(self.config, "save_all", False)
-            self.redo_center_crop = getattr(self.config, "redo_center_crop", False)
-            self.center_crop = getattr(self.config, "center_crop", 448)
-            self.amap_threshold = getattr(self.config, "amap_threshold", 0.7)
-            self.score_thres = getattr(self.config, "score_thres", 0.5)
-            self.min_area_ratio = getattr(self.config, "min_area_ratio", 1e-3)
-            self.bbox_pad_ratio = getattr(self.config, "bbox_pad_ratio", 0.02)
-        elif isinstance(self.config, dict):
-            self.input_size = int(self.config.get("input_size", 256))
-            self.save_all = bool(self.config.get("save_all", False))
-            self.redo_center_crop = bool(self.config.get("redo_center_crop", False))
-            self.center_crop = int(self.config.get("center_crop", 448))
-            self.amap_threshold = float(self.config.get("amap_threshold", 0.7))
-            self.score_thres = float(self.config.get("score_thres", 0.5))
-            self.min_area_ratio = float(self.config.get("min_area_ratio", 1e-3))
-            self.bbox_pad_ratio = float(self.config.get("bbox_pad_ratio", 0.02))
+        """
+        07082026 - KHAI - Fix how AnomalyInferencer is initialized
+        """
+        if isinstance(config, AnomalyConfig):
+            self.input_size = getattr(config, "input_size", 256)
+            self.save_all = getattr(config, "save_all", False)
+            self.redo_center_crop = getattr(config, "redo_center_crop", False)
+            self.center_crop = getattr(config, "center_crop", 448)
+            self.amap_threshold = getattr(config, "amap_threshold", 0.7)
+            self.score_thres = getattr(config, "score_thres", 0.5)
+            self.min_area_ratio = getattr(config, "min_area_ratio", 1e-3)
+            self.bbox_pad_ratio = getattr(config, "bbox_pad_ratio", 0.02)
+        elif isinstance(config, dict):
+            self.input_size = int(config.get("input_size", 256))
+            self.save_all = bool(config.get("save_all", False))
+            self.redo_center_crop = bool(config.get("redo_center_crop", False))
+            self.center_crop = int(config.get("center_crop", 448))
+            self.amap_threshold = float(config.get("amap_threshold", 0.7))
+            self.score_thres = float(config.get("score_thres", 0.5))
+            self.min_area_ratio = float(config.get("min_area_ratio", 1e-3))
+            self.bbox_pad_ratio = float(config.get("bbox_pad_ratio", 0.02))
         else:
             self.input_size = 256
             self.save_all = False
@@ -44,12 +46,15 @@ class AnomalyInferencer(BaseVisionTask):
             self.score_thres = 0.5
             self.min_area_ratio = 1e-3
             self.bbox_pad_ratio = 0.02
+        super().__init__(model_path, device, config)
 
     def load_model(self):
+        """
+        07082026 - KHAI - Remove passing value to config for Inferencer
+        """
         self.model = OpenVINOInferencer(
             path=self.model_path,
             device=self.device,
-            config=asdict(self.config) or None,
         )
         self.model.predict(np.zeros((self.input_size, self.input_size, 3), dtype=np.uint8))
     
@@ -84,7 +89,10 @@ class AnomalyInferencer(BaseVisionTask):
 
         preds = self.model.predict(image=crop_rgb)
 
-        score = float(getattr(preds, "pred_score", 0.0))
+        """
+        07082026 - KHAI - Fix how to take pred_score
+        """
+        score = preds.pred_score.item()
         am_raw = preds.anomaly_map
         if am_raw.ndim == 4:
             am_raw = am_raw[0, 0]
