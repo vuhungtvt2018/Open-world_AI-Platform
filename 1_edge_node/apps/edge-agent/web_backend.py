@@ -103,7 +103,7 @@ os.makedirs(SYNC_DEFECT_IMAGE_DIR, exist_ok=True)
 app.mount("/sync_images", StaticFiles(directory=SYNC_DEFECT_IMAGE_DIR), name="sync_images")
 
 """
-06082026 - KHAI - Refactor code to adhere to modified Pipeline
+07082026 - KHAI - Refactor code to adhere to modified Pipeline
 """
 class WebInference:
     def __init__(self, config):
@@ -246,12 +246,12 @@ class WebInference:
 
                 # Anomaly Detection
                 out = self.pipeline.anomaly.run(crop, crop_mask)
-                is_ng = bool(out.get("is_ng", False))
+                is_ng = bool(getattr(out, "is_ng", False))
                 
                 # Visualization tiles
                 hm_tile = None
-                if out.get("hm_disp") is not None:
-                    hm_tile = out["hm_disp"].copy()
+                if getattr(out, "heatmap_display") is not None:
+                    hm_tile = out.heatmap_display.copy()
                     label_small = f"obj{i} {'NG' if is_ng else 'OK'}"
                     color = (0, 0, 255) if is_ng else (0, 200, 0)
                     cv2.putText(hm_tile, label_small, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
@@ -262,10 +262,10 @@ class WebInference:
                 if is_ng:
                     ng_any = True
                     # Lưu heatmap cho NG
-                    cv2.imwrite(os.path.join(self.pipeline.dir_ng, f"NG_HEAT_{name}_{i}.jpg"), out["hm_disp"])
-                    
-                    for ak, a in enumerate(out.get("anomalies", [])):
-                        cx1, cy1, cx2, cy2 = a["bbox_in_object_crop"]
+                    cv2.imwrite(os.path.join(self.pipeline.dir_ng, f"NG_HEAT_{name}_{i}.jpg"), out.heatmap_display)
+
+                    for ak, a in enumerate(getattr(out, "boxes", [])):
+                        cx1, cy1, cx2, cy2 = a.xmin, a.ymin, a.xmax, a.ymax
                         anomalies_full.append({
                             "k": ak,
                             "bbox_full": [int(cx1), int(cy1), int(cx2), int(cy2)],
@@ -318,9 +318,9 @@ class WebInference:
                 per_objects.append({
                     "index": i,
                     "bbox": [0, 0, crop.shape[1], crop.shape[0]],
-                    "score": round(float(out.get("score", 0.0)), 4),
+                    "score": round(float(getattr(out, "classification_score", 0.0)), 4),
                     "is_ng": is_ng,
-                    "overlap_ratio": round(float(out.get("overlap_ratio", 0.0)), 4) if crop.size != 0 else 0.0,
+                    "overlap_ratio": round(float(getattr(out, "overlap_ratio", 0.0)), 4) if crop.size != 0 else 0.0,
                     "crop": crop_name,
                     "crop_url": f"/captures/{self.cfg.PRODUCT_NAME}/sessions/{os.path.basename(self.pipeline.session_root)}/crops/{crop_name}",
                     "hm_tile": hm_tile,
