@@ -265,7 +265,10 @@ class WebInference:
                     cv2.imwrite(os.path.join(self.pipeline.dir_ng, f"NG_HEAT_{name}_{i}.jpg"), out.heatmap_display)
 
                     for ak, a in enumerate(getattr(out, "boxes", [])):
-                        cx1, cy1, cx2, cy2 = a.xmin, a.ymin, a.xmax, a.ymax
+                        """
+                        08082026 - KHAI - Refactor code to adhere to modified Pipeline
+                        """
+                        cx1, cy1, cx2, cy2 = int(a.min), int(a.ymin), int(a.xmax), int(a.ymax)
                         anomalies_full.append({
                             "k": ak,
                             "bbox_full": [int(cx1), int(cy1), int(cx2), int(cy2)],
