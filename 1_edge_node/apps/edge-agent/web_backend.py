@@ -244,6 +244,14 @@ class WebInference:
                 crop_path = os.path.join(self.pipeline.dir_crops, crop_name)
                 cv2.imwrite(crop_path, crop)
 
+                """
+                09082026 - KHAI - Add codes to save mask
+                """
+                # Lưu mask
+                mask_name = f"MASK_{name}_{i}.jpg"
+                mask_path = os.path.join(self.pipeline.dir_masks, mask_name)
+                cv2.imwrite(mask_path, crop_mask)
+
                 # Anomaly Detection
                 out = self.pipeline.anomaly.run(crop, crop_mask)
                 is_ng = bool(getattr(out, "is_ng", False))
@@ -268,7 +276,7 @@ class WebInference:
                         """
                         08082026 - KHAI - Refactor code to adhere to modified Pipeline
                         """
-                        cx1, cy1, cx2, cy2 = int(a.min), int(a.ymin), int(a.xmax), int(a.ymax)
+                        cx1, cy1, cx2, cy2 = int(a.xmin), int(a.ymin), int(a.xmax), int(a.ymax)
                         anomalies_full.append({
                             "k": ak,
                             "bbox_full": [int(cx1), int(cy1), int(cx2), int(cy2)],
