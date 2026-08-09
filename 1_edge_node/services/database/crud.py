@@ -1,12 +1,12 @@
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from datetime import datetime
-from .models import InspectionRecord, BoltObject, AnomalyDetail
+from .models import InspectionRecord, InspectionObject, AnomalyDetail
 from .session import SessionLocal
 
 def create_inspection_record(record_data: Dict[str, Any]):
     """
-    Tạo bản ghi InspectionRecord kèm theo các BoltObject và AnomalyDetail.
+    Tạo bản ghi InspectionRecord kèm theo các InspectionObject và AnomalyDetail.
     record_data có dạng:
     {
         "timestamp": "...",
@@ -15,6 +15,7 @@ def create_inspection_record(record_data: Dict[str, Any]):
         "latency_ms": 0.0,
         "objects": [
             {
+                "product_id": int,
                 "index": int,
                 "bbox": [x1, y1, x2, y2],
                 "score": float,
@@ -43,7 +44,8 @@ def create_inspection_record(record_data: Dict[str, Any]):
         )
         
         for obj_data in record_data.get("objects", []):
-            db_obj = BoltObject(
+            db_obj = InspectionObject(
+                product_id=obj_data["product_id"],
                 object_index=obj_data.get("index", 0),
                 bbox=str(obj_data.get("bbox", [])),
                 score=obj_data.get("score", 0.0),
