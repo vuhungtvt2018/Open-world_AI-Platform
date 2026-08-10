@@ -356,7 +356,59 @@ class WebInference:
         # 3. Overall output
         overall_vis = frame.copy()
         for i, obj in enumerate(per_objects):
-            pass 
+            """
+            10082026 - KHANH - Visualize OK and NG objects in overall output
+            """
+            object_index = obj["index"]
+
+            if object_index >= len(mapping_object):
+                continue
+
+            x1, y1, x2, y2 = map(
+                int,
+                mapping_object[object_index]["seg_box"],
+            )
+
+            is_ng = obj["is_ng"]
+            color = (0, 0, 255) if is_ng else (0, 255, 0)
+            status = "NG" if is_ng else "OK"
+            label = f"Object {object_index}: {status}"
+
+            cv2.rectangle(
+                overall_vis,
+                (x1, y1),
+                (x2, y2),
+                color,
+                3,
+            )
+
+            (text_width, text_height), baseline = cv2.getTextSize(
+                label,
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                2,
+            )
+
+            label_top = max(0, y1 - text_height - baseline - 8)
+
+            cv2.rectangle(
+                overall_vis,
+                (x1, label_top),
+                (x1 + text_width + 10, y1),
+                color,
+                -1,
+            )
+
+            cv2.putText(
+                overall_vis,
+                label,
+                (x1 + 5, y1 - baseline - 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA,
+            )
         
         overall_name = f"OVERALL_{name}.jpg"
         overall_path = os.path.join(self.pipeline.session_root, overall_name)
