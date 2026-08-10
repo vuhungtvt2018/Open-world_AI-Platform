@@ -4,6 +4,8 @@ from fastapi import APIRouter
 
 from services.database.session import SessionLocal
 
+from services.database.models import InspectionRecord
+
 from ..app_config import cfg
 
 router = APIRouter()
