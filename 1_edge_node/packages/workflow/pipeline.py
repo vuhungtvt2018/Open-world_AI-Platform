@@ -48,31 +48,39 @@ class Pipeline:
             print("[PIPELINE] Khởi tạo mô hình YOLODetector Keypoints...")
             self.keypoint_detection = YOLODetector(self.cfg.KEYPOINTS_MODEL_PATH)
 
-        print("[PIPELINE] Khởi tạo mô hình Anomaly (Anomalib)...")
-        anom_cfg = AnomalyConfig(
-            input_size=self.cfg.ANOMALY_INPUT_SIZE,
-            score_thres=self.cfg.ANOMALY_SCORE_THRESHOLD,
-            inside_overlap_min=self.cfg.ANOMALY_INSIDE_OVERLAP_MIN,
-            min_area_ratio=self.cfg.ANOMALY_MIN_AREA_RATIO,
-            bbox_pad_ratio=self.cfg.ANOMALY_BBOX_PAD_RATIO,
-            save_all=self.cfg.SAVE_ALL_ANOMALIES,
-            show_all_boxes=self.cfg.SHOW_ALL_ANOMALY_BOXES,
-            amap_threshold=self.cfg.ANOMALY_AMAP_THRESHOLD,
-            redo_center_crop=self.cfg.REDO_CENTER_CROP,
-            center_crop=self.cfg.CENTER_CROP
-        )
-        self.anomaly = AnomalyInferencer(
-            model_path=self.cfg.ANOMALY_MODEL_PATH,
-            device=self.cfg.ANOMALY_DEVICE,
-            cfg=anom_cfg
-        )
-        
-        # Thử tải mô hình vào bộ nhớ (warmup)
-        print("[PIPELINE] Khởi động Anomalib (warmup)...")
-        dummy_img = np.zeros((self.cfg.ANOMALY_INPUT_SIZE, self.cfg.ANOMALY_INPUT_SIZE, 3), dtype=np.uint8)
-        dummy_mask = np.ones((self.cfg.ANOMALY_INPUT_SIZE, self.cfg.ANOMALY_INPUT_SIZE), dtype=np.uint8)
-        self.anomaly.run_on_crop(dummy_img, dummy_mask)
-        print("[PIPELINE] Sẵn sàng!")
+        # 11082026 - KIET - Tạm ngưng load Anomaly checkpoint để kiểm tra luồng OD.
+        self.anomaly = None
+
+        # print("[PIPELINE] Khởi tạo mô hình Anomaly (Anomalib)...")
+        # anom_cfg = AnomalyConfig(
+        #     input_size=self.cfg.ANOMALY_INPUT_SIZE,
+        #     score_thres=self.cfg.ANOMALY_SCORE_THRESHOLD,
+        #     inside_overlap_min=self.cfg.ANOMALY_INSIDE_OVERLAP_MIN,
+        #     min_area_ratio=self.cfg.ANOMALY_MIN_AREA_RATIO,
+        #     bbox_pad_ratio=self.cfg.ANOMALY_BBOX_PAD_RATIO,
+        #     save_all=self.cfg.SAVE_ALL_ANOMALIES,
+        #     show_all_boxes=self.cfg.SHOW_ALL_ANOMALY_BOXES,
+        #     amap_threshold=self.cfg.ANOMALY_AMAP_THRESHOLD,
+        #     redo_center_crop=self.cfg.REDO_CENTER_CROP,
+        #     center_crop=self.cfg.CENTER_CROP
+        # )
+        # self.anomaly = AnomalyInferencer(
+        #     model_path=self.cfg.ANOMALY_MODEL_PATH,
+        #     device=self.cfg.ANOMALY_DEVICE,
+        #     cfg=anom_cfg
+        # )
+
+        # print("[PIPELINE] Khởi động Anomalib (warmup)...")
+        # dummy_img = np.zeros(
+        #     (self.cfg.ANOMALY_INPUT_SIZE, self.cfg.ANOMALY_INPUT_SIZE, 3),
+        #     dtype=np.uint8,
+        # )
+        # dummy_mask = np.ones(
+        #     (self.cfg.ANOMALY_INPUT_SIZE, self.cfg.ANOMALY_INPUT_SIZE),
+        #     dtype=np.uint8,
+        # )
+        # self.anomaly.run_on_crop(dummy_img, dummy_mask)
+        print("[PIPELINE] Anomaly tạm thời bị vô hiệu hóa để test OD.")
 
     def match_objects(self, kp_objs: List[Dict], seg_objs: List[Dict], iou_thresh: float = 0.5):
         """

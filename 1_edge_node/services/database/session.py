@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 import os
 
@@ -17,8 +17,65 @@ engine = create_engine(
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
+    """
+    11082026 - KIET - Khai báo base class dùng chung cho SQLAlchemy models.
+    """
+
     pass
 
-def init_db():
+
+def migrate_od_columns() -> None:
+    """
+    11082026 - KIET - Bổ sung các column OD vào database SQLite cũ nếu còn thiếu.
+    """
+
+    required_columns = {
+        "inspection_records": {
+            "task_type": (
+                "ALTER TABLE inspection_records "
+                "ADD COLUMN task_type VARCHAR(30) DEFAULT 'inspection'"
+            ),
+            "camera_id": (
+                "ALTER TABLE inspection_records "
+                "ADD COLUMN camera_id VARCHAR(100)"
+            ),
+            "total_objects": (
+                "ALTER TABLE inspection_records "
+                "ADD COLUMN total_objects INTEGER DEFAULT 0"
+            ),
+        },
+        "bolt_objects": {
+            "class_id": (
+                "ALTER TABLE bolt_objects "
+                "ADD COLUMN class_id INTEGER"
+            ),
+            "class_name": (
+                "ALTER TABLE bolt_objects "
+                "ADD COLUMN class_name VARCHAR(100)"
+            ),
+        },
+    }
+
+    with engine.begin() as connection:
+        for table_name, column_definitions in required_columns.items():
+            existing_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns(table_name)
+            }
+
+            for column_name, alter_statement in column_definitions.items():
+                if column_name in existing_columns:
+                    continue
+
+                connection.execute(text(alter_statement))
+
+
+def init_db() -> None:
+    """
+    11082026 - KIET - Khởi tạo tables và migrate schema OD trên database cũ.
+    """
+
     from . import models
+
     Base.metadata.create_all(bind=engine)
+    migrate_od_columns()

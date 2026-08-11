@@ -8,7 +8,6 @@ CAM_HEIGHT: 720
 CAPTURE_DIR: captures
 PRODUCT_NAME: sp1
 FLIP_VERTICAL: false
-MODEL_PATH: model_checkpoint\bulong_8ly_s.pt
 DISPLAY_SCALE: 1
 PAD_RATIO: 0.1
 ANOMALY_MODEL_PATH: model_checkpoint\bulong_256l.onnx
@@ -35,8 +34,10 @@ DEFECT_CLS_URL: http://127.0.0.1:8031/search/by-image
 DEFECT_CLS_TOPK: 1
 DEFECT_CLS_METRIC: cosine
 DEFECT_CLS_SIM_THRESHOLD: 0.1
-KEYPOINT_DETECTION: true
+KEYPOINT_DETECTION: false
 KEYPOINTS_MODEL_PATH: model_checkpoint\bulong_8ly_keypoint_20251004.pt
 KEYPOINTS_SCORE_THRESHOLD: 0.5
 DISK_CLEANUP_DAYS: 15.0
 DISK_CLEANUP_INTERVAL_HOURS: 24.0
+# 11082026 - KIET - Khai báo checkpoint dùng cho Object Detection counting.
+MODEL_PATH:  C:\Users\IVS-1437\Desktop\PlatformAI\Open-world_AI-Platform\best.pt

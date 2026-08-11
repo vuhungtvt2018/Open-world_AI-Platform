@@ -7,3 +7,13 @@ __pycache__/
 .env/
 captures/
 node_modules
+
+# Model checkpoint
+/bulong_8ly_s.pt
+/best.pt
+# Python virtual environment
+/venv/
+# Frontend lock file
+/0_frontend/package-lock.json
+/1_edge_node/test_ai_core.py
+/1_edge_node/packages/ai/engines/fake.py

@@ -15,6 +15,8 @@ import time
 import numpy as np
 import shutil
 import psutil
+import threading
+from collections import Counter
 from fastapi import FastAPI, Response, UploadFile, File
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +33,8 @@ from services.database.session import init_db, SessionLocal
 from services.database.crud import create_inspection_record
 from packages.utils.cleaner import run_cleaner_daemon
 from services.database.models import InspectionRecord
+from packages.ai.engines.pytorch import UltralyticsBackend
+from packages.ai.tasks.detection import DetectionTask
 
 app = FastAPI(title="Visual Inspection AI")
 
@@ -104,8 +108,32 @@ app.mount("/sync_images", StaticFiles(directory=SYNC_DEFECT_IMAGE_DIR), name="sy
 
 class WebInference:
     def __init__(self, config):
+        """
+        11082026 - KIET - Khởi tạo inspection pipeline, Object Detection và camera inputs.
+        """
+
         self.cfg = config
         self.pipeline = Pipeline(config)
+
+        # 11082026 - KIET - Resolve checkpoint OD theo project root khi config dùng relative path.
+        od_model_path = self.cfg.MODEL_PATH
+        if not os.path.isabs(od_model_path):
+            od_model_path = os.path.join(str(ROOT), od_model_path)
+
+        # 11082026 - KIET - Khởi tạo và load Object Detection backend một lần.
+        self.od_backend = UltralyticsBackend(
+            checkpoint=od_model_path,
+            device="cpu",
+            confidence=0.6,
+            image_size=640,
+        )
+        self.od_backend.load()
+
+        # 11082026 - KIET - Nối Ultralytics backend với DetectionTask chuẩn hóa output.
+        self.od_task = DetectionTask(backend=self.od_backend)
+
+        # 11082026 - KIET - Bảo vệ model trước nhiều request inference đồng thời.
+        self.od_lock = threading.Lock()
         
         # Khởi tạo Multi-Camera Stream
         self.cameras = {} # id -> Camera_Instance
@@ -141,6 +169,112 @@ class WebInference:
             if self.current_frame is None:
                 return None
             return self.current_frame.copy()
+
+    def _count_predictions_by_class(self, predictions) -> dict[str, int]:
+        """
+        11082026 - KIET - Đếm số prediction theo từng class trong frame hiện tại.
+        """
+
+        return dict(
+            Counter(
+                prediction.class_name or "unknown"
+                for prediction in predictions
+            )
+        )
+
+    def _build_detection_objects(self, predictions) -> list[dict]:
+        """
+        11082026 - KIET - Chuyển Prediction thành payload tương thích database cũ.
+        """
+
+        objects = []
+
+        for index, prediction in enumerate(predictions):
+            bbox = prediction.bbox
+            if bbox is None:
+                continue
+
+            objects.append({
+                "index": index,
+                "bbox": [
+                    float(bbox.xmin),
+                    float(bbox.ymin),
+                    float(bbox.xmax),
+                    float(bbox.ymax),
+                ],
+                "score": float(prediction.confidence),
+                "class_id": int(prediction.class_id),
+                "class_name": prediction.class_name,
+                # 11082026 - KIET - Giữ các field inspection cũ để CRUD tương thích.
+                "is_ng": False,
+                "overlap_ratio": 0.0,
+                "crop": "",
+                "anomalies": [],
+            })
+
+        return objects
+
+    def run_detection(self, cam_id: str = "default") -> dict:
+        """
+        11082026 - KIET - Chạy Object Detection và counting theo class trên một frame.
+        """
+
+        frame = self.get_frame(cam_id)
+        if frame is None:
+            return {"status": "error", "message": "No input frame available"}
+
+        if self.cfg.FLIP_VERTICAL:
+            frame = cv2.flip(frame, 0)
+
+        timestamp = ts()
+
+        # 11082026 - KIET - Chạy model tuần tự để tránh xung đột giữa các request.
+        with self.od_lock:
+            result = self.od_task.run(frame)
+
+        objects = self._build_detection_objects(result.predictions)
+        counts_by_class = self._count_predictions_by_class(result.predictions)
+        total_objects = len(objects)
+
+        # 11082026 - KIET - Tái sử dụng thư mục original của inspection session cũ.
+        image_name = f"IMG_{timestamp}.jpg"
+        image_path = os.path.join(self.pipeline.dir_original, image_name)
+        cv2.imwrite(image_path, frame)
+
+        record = {
+            "timestamp": timestamp,
+            "image": image_name,
+            "task_type": "detection",
+            "camera_id": cam_id,
+            "latency_ms": round(result.processing_time_ms, 2),
+            "total_objects": total_objects,
+            "ng_detected": False,
+            "objects": objects,
+        }
+
+        from packages.workflow.events import default_event_bus, EventBus
+
+        # 11082026 - KIET - Tái sử dụng EventBus và callback lưu database hiện tại.
+        default_event_bus.publish(EventBus.EVENT_INFERENCE_DONE, record=record)
+
+        session_url = (
+            f"/captures/{self.cfg.PRODUCT_NAME}/sessions/"
+            f"{os.path.basename(self.pipeline.session_root)}"
+        )
+
+        return {
+            "status": "success",
+            "timestamp": timestamp,
+            "task": "detection",
+            "camera_id": cam_id,
+            "metrics": {
+                "latency_ms": round(result.processing_time_ms, 2),
+                "total_objects": total_objects,
+                "counts_by_class": counts_by_class,
+            },
+            "original_image_url": f"{session_url}/original/{image_name}",
+            "objects": objects,
+        }
 
     def run_inspect(self, cam_id: str = "default"):
         frame = self.get_frame(cam_id)
@@ -400,6 +534,19 @@ class WebInference:
 
 inference_engine = WebInference(cfg)
 
+
+@app.on_event("shutdown")
+def shutdown_inference_engine() -> None:
+    """
+    11082026 - KIET - Giải phóng OD backend và camera khi Web Backend dừng.
+    """
+
+    inference_engine.od_backend.close()
+
+    for camera in inference_engine.cameras.values():
+        if camera is not None:
+            camera.stop()
+
 @app.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
     # Đọc luồng byte trực tiếp vào RAM
@@ -467,9 +614,19 @@ async def set_mode(mode: str, cam: str = "default"):
 async def trigger_inspect(cam: str = "default"):
     return inference_engine.run_inspect(cam)
 
+
+@app.post("/detect")
+def trigger_detection(cam: str = "default"):
+    """
+    11082026 - KIET - Chạy Object Detection và trả số lượng theo class.
+    """
+
+    return inference_engine.run_detection(cam)
+
 @app.get("/history")
 async def get_history():
     import ast
+    import json
     db = SessionLocal()
     try:
         db.commit() # Force close any lingering transaction to get fresh data
@@ -493,12 +650,20 @@ async def get_history():
                         "cls_similarity": a.similarity
                     })
                 try:
-                    obbox = ast.literal_eval(o.bbox) if o.bbox else []
-                except: obbox = []
+                    # 11082026 - KIET - Ưu tiên JSON mới và fallback dữ liệu str() cũ.
+                    obbox = json.loads(o.bbox) if o.bbox else []
+                except (json.JSONDecodeError, TypeError):
+                    try:
+                        obbox = ast.literal_eval(o.bbox) if o.bbox else []
+                    except (ValueError, SyntaxError):
+                        obbox = []
                 objs.append({
                     "index": o.object_index,
                     "bbox": obbox,
                     "score": o.score,
+                    # 11082026 - KIET - Trả metadata OD để frontend hiển thị class counting.
+                    "class_id": o.class_id,
+                    "class_name": o.class_name,
                     "is_ng": o.is_ng,
                     "overlap_ratio": o.overlap_ratio,
                     "crop": o.crop_image,
@@ -506,12 +671,27 @@ async def get_history():
                     "anomaly_count": len(anoms),
                     "anomaly_bboxes_sample": [a["bbox_full"] for a in anoms[:3]]
                 })
+
+            # 11082026 - KIET - Tính lại count theo class từ các object đã lưu.
+            counts_by_class = {}
+            if r.task_type == "detection":
+                counts_by_class = dict(
+                    Counter(
+                        obj["class_name"] or "unknown"
+                        for obj in objs
+                    )
+                )
+
             results.append({
                 "timestamp": r.timestamp,
                 "image": r.original_image,
                 "ng_detected": r.ng_detected,
                 "latency_ms": r.latency_ms,
-                "total_objects": len(objs),
+                # 11082026 - KIET - Trả metadata OD nhưng vẫn giữ response inspection cũ.
+                "task_type": r.task_type,
+                "camera_id": r.camera_id,
+                "total_objects": r.total_objects if r.task_type == "detection" else len(objs),
+                "counts_by_class": counts_by_class,
                 "ng_count": sum(1 for ob in objs if ob["is_ng"]),
                 "max_score": max([ob["score"] for ob in objs]) if objs else 0.0,
                 "objects": objs
@@ -666,7 +846,7 @@ async def get_system_health():
 
 @app.get("/api/analytics")
 def get_analytics():
-    from services.database.models import QCProductPhotoLibrary, InspectionRecord
+    from services.database.models import QCProductPhotoLibrary, InspectionRecord, BoltObject
     from sqlalchemy import func
     import dateutil.parser
     from datetime import datetime
@@ -695,6 +875,27 @@ def get_analytics():
         
         total_inspected = len(records)
         total_ng = sum(1 for r in records if r.ng_detected)
+
+        # 11082026 - KIET - Tính tổng object của các record Object Detection.
+        total_detected = (
+            db.query(func.sum(InspectionRecord.total_objects))
+            .filter(InspectionRecord.task_type == "detection")
+            .scalar()
+            or 0
+        )
+
+        # 11082026 - KIET - Thống kê tổng số object theo class đã lưu trong database.
+        od_class_rows = (
+            db.query(BoltObject.class_name, func.count(BoltObject.id))
+            .join(InspectionRecord, BoltObject.record_id == InspectionRecord.id)
+            .filter(InspectionRecord.task_type == "detection")
+            .group_by(BoltObject.class_name)
+            .all()
+        )
+        detection_counts_by_class = {
+            class_name or "unknown": count
+            for class_name, count in od_class_rows
+        }
         
         hourly_stats = {}
         
@@ -754,6 +955,9 @@ def get_analytics():
 
         return {
             "totalInspected": total_inspected,
+            # 11082026 - KIET - Bổ sung analytics OD mà không thay response inspection cũ.
+            "totalDetected": int(total_detected),
+            "detectionCountsByClass": detection_counts_by_class,
             "overallYield": round(overall_yield, 1),
             "totalNg": total_ng,
             "avgCycleTime": 2.45,
@@ -765,6 +969,8 @@ def get_analytics():
         print(f"Error fetching analytics: {e}")
         return {
             "totalInspected": 0,
+            "totalDetected": 0,
+            "detectionCountsByClass": {},
             "overallYield": 100.0,
             "totalNg": 0,
             "avgCycleTime": 0.0,

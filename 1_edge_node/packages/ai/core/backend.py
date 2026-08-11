@@ -8,6 +8,9 @@ class BaseBackend(ABC):
     """
 
     def __init__(self):
+        """
+        11082026 - KIET - Khởi tạo trạng thái mặc định của backend.
+        """
         self.is_loaded = False
 
     @abstractmethod
@@ -17,6 +20,7 @@ class BaseBackend(ABC):
         """
         raise NotImplementedError
 
+    @abstractmethod
     def predict(self, image: np.ndarray):
         """
         05082026 - KIET - run interface và trả raw output

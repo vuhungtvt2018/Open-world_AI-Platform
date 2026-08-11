@@ -6,7 +6,9 @@ import json
 from .session import Base
 
 class InspectionRecord(Base):
-    """Bảng đại diện cho một lần chụp ảnh toàn cảnh (Capture)"""
+    """
+    11082026 - KIET - Đại diện cho một lần inspection hoặc Object Detection.
+    """
     __tablename__ = "inspection_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -15,6 +17,15 @@ class InspectionRecord(Base):
     ng_detected: Mapped[bool] = mapped_column(Boolean, default=False)
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[str] = mapped_column(DateTime, server_default=func.now())
+
+    # 11082026 - KIET - Phân biệt record inspection cũ với Object Detection.
+    task_type: Mapped[str] = mapped_column(String(30), default="inspection", index=True)
+
+    # 11082026 - KIET - Lưu camera tạo ra kết quả inference.
+    camera_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # 11082026 - KIET - Lưu tổng số object được phát hiện trong frame.
+    total_objects: Mapped[int] = mapped_column(Integer, default=0)
     
     # Quan hệ 1-N với BoltObject
     objects: Mapped[List["BoltObject"]] = relationship(
@@ -22,7 +33,9 @@ class InspectionRecord(Base):
     )
 
 class BoltObject(Base):
-    """Bảng đại diện cho một con bu-lông trong ảnh"""
+    """
+    11082026 - KIET - Đại diện cho một object inspection hoặc Object Detection.
+    """
     __tablename__ = "bolt_objects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -33,6 +46,12 @@ class BoltObject(Base):
     is_ng: Mapped[bool] = mapped_column(Boolean, default=False)
     overlap_ratio: Mapped[float] = mapped_column(Float, default=0.0)
     crop_image: Mapped[str] = mapped_column(String(255))
+
+    # 11082026 - KIET - Lưu class ID của object từ model Detection.
+    class_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # 11082026 - KIET - Lưu class name để thống kê số lượng theo class.
+    class_name: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     
     record: Mapped["InspectionRecord"] = relationship("InspectionRecord", back_populates="objects")
     
