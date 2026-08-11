@@ -327,6 +327,7 @@ class WebInference:
                                     (255, 255, 255), 2, cv2.LINE_AA)
 
                 per_objects.append({
+                    "product_id": 1,
                     "index": i,
                     "bbox": [0, 0, crop.shape[1], crop.shape[0]],
                     "score": round(float(getattr(out, "classification_score", 0.0)), 4),

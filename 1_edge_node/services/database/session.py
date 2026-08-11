@@ -21,4 +21,7 @@ class Base(DeclarativeBase):
 
 def init_db():
     from . import models
+    from .seed import initialize_default_product
+
     Base.metadata.create_all(bind=engine)
+    initialize_default_product()
