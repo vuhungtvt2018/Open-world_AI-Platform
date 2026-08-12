@@ -16,6 +16,22 @@
   border: 1px solid var(--border);
 }
 
+.mode-group-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.mode-group-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .mode-btn {
   display: flex;
   align-items: center;
@@ -35,6 +51,11 @@
   background-color: var(--surface);
   color: var(--primary);
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.mode-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .inspect-btn {
@@ -120,6 +141,7 @@
 
 .result-tag.ng { background-color: var(--secondary); color: #fff; }
 .result-tag.ok { background-color: var(--success); color: #fff; }
+.result-tag.detected { background-color: var(--primary); color: #fff; }
 
 .image-display {
   flex: 1;
@@ -146,6 +168,7 @@
   display: flex;
   flex-direction: column;
   gap: 20px;
+  min-width: 0;
 }
 
 .result-details {
@@ -194,6 +217,7 @@
   gap: 6px;
   max-height: 350px;
   overflow-y: auto;
+  overflow-x: hidden;
   padding-right: 4px;
 }
 
@@ -207,6 +231,18 @@
   color: var(--text-muted);
   transition: all 0.2s;
   border: 1px solid transparent;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+/* 12082026 - KIET - Thu gọn tên ảnh dài để không tạo thanh cuộn ngang. */
+.image-item .truncate {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .item-thumbnail-wrapper {
@@ -305,4 +341,71 @@
   height: 1px;
   background-color: var(--border);
   margin: 12px 0;
+}
+
+.detection-data-panel {
+  background-color: var(--surface);
+}
+
+.detection-count-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.detection-count-card {
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.detection-count-card strong {
+  color: var(--primary);
+  font-size: 28px;
+}
+
+.detection-result-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+@media (max-width: 1100px) {
+  .inspection-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .side-panels {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .inspection-container {
+    padding: 16px;
+  }
+
+  .quad-viewer,
+  .side-panels {
+    grid-template-columns: 1fr;
+  }
+
+  .detection-count-grid {
+    grid-template-columns: 1fr;
+  }
+
 }

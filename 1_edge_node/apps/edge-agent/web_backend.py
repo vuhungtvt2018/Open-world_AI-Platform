@@ -267,6 +267,9 @@ class WebInference:
             "timestamp": timestamp,
             "task": "detection",
             "camera_id": cam_id,
+            # 12082026 - KIET - Trả kích thước ảnh để frontend scale bounding box chính xác.
+            "image_width": result.image_width,
+            "image_height": result.image_height,
             "metrics": {
                 "latency_ms": round(result.processing_time_ms, 2),
                 "total_objects": total_objects,
