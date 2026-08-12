@@ -728,8 +728,100 @@ async def get_result_image(image_name: str):
         return FileResponse(matches[0])
     return Response(status_code=404)
 
+
+@app.get("/api/dataset-records/{record_id}")
+async def get_dataset_record(record_id: int):
+    """
+    12082026 - KIET - Trả chi tiết record và object để frontend vẽ annotation từ database.
+    """
+
+    import ast
+    import json
+
+    db = SessionLocal()
+    try:
+        record = (
+            db.query(InspectionRecord)
+            .filter(InspectionRecord.id == record_id)
+            .first()
+        )
+
+        if record is None:
+            return Response(
+                status_code=404,
+                content="Dataset record not found",
+            )
+
+        image_name = (
+            record.original_image.split("/")[-1].split("\\")[-1]
+            if record.original_image
+            else f"IMG_{record.timestamp}.jpg"
+        )
+        image_pattern = os.path.join(
+            cfg.CAPTURE_DIR,
+            cfg.PRODUCT_NAME,
+            "sessions",
+            "*",
+            "original",
+            image_name,
+        )
+        image_matches = glob.glob(image_pattern)
+        image_width = 0
+        image_height = 0
+
+        if image_matches:
+            image = cv2.imread(image_matches[0])
+            if image is not None:
+                image_height, image_width = image.shape[:2]
+
+        objects = []
+        for obj in record.objects:
+            try:
+                bbox = json.loads(obj.bbox) if obj.bbox else []
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    bbox = ast.literal_eval(obj.bbox) if obj.bbox else []
+                except (ValueError, SyntaxError):
+                    bbox = []
+
+            objects.append({
+                "index": obj.object_index,
+                "bbox": bbox,
+                "score": obj.score,
+                "class_id": obj.class_id,
+                "class_name": obj.class_name,
+            })
+
+        # 12082026 - KIET - Tính count từ object để tránh lưu dữ liệu tổng hợp trùng lặp.
+        counts_by_class = {}
+        if record.task_type == "detection":
+            counts_by_class = dict(
+                Counter(
+                    obj["class_name"] or "unknown"
+                    for obj in objects
+                )
+            )
+
+        return {
+            "id": record.id,
+            "task_type": record.task_type,
+            "image_url": f"/api/image/{image_name}",
+            "image_width": image_width,
+            "image_height": image_height,
+            "total_objects": record.total_objects,
+            "counts_by_class": counts_by_class,
+            "objects": objects,
+        }
+    finally:
+        db.close()
+
+
 @app.get("/dataset-stats")
 async def get_dataset_stats():
+    """
+    12082026 - KIET - Trả danh sách dataset có metadata riêng cho Inspection và Detection.
+    """
+
     db = SessionLocal()
     try:
         db.commit() # Clear cached transaction
@@ -745,12 +837,30 @@ async def get_dataset_stats():
                 if len(parts) >= 2 and len(parts[0]) == 8 and len(parts[1]) == 6:
                     d, t = parts[0], parts[1]
                     date_str = f"{d[6:8]}/{d[4:6]}/{d[0:4]} {t[0:2]}:{t[2:4]}:{t[4:6]}"
+
+            # 12082026 - KIET - Không gắn record Detection thành kết quả OK của Inspection.
+            record_type = (
+                "Detection"
+                if r.task_type == "detection"
+                else ("NG" if r.ng_detected else "OK")
+            )
+            counts_by_class = {}
+            if r.task_type == "detection":
+                counts_by_class = dict(
+                    Counter(
+                        obj.class_name or "unknown"
+                        for obj in r.objects
+                    )
+                )
                 
             images_list.append({
                 "id": r.id,
                 "name": r.original_image.split('/')[-1].split('\\')[-1] if r.original_image else f"IMG_{r.timestamp}.jpg",
                 "status": "labeled",
-                "type": "NG" if r.ng_detected else "OK",
+                "type": record_type,
+                "task_type": r.task_type,
+                "total_objects": r.total_objects,
+                "counts_by_class": counts_by_class,
                 "date": date_str,
                 "product": cfg.PRODUCT_NAME
             })

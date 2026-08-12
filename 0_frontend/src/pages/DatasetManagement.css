@@ -221,7 +221,26 @@
 
 .tag.type.ok { background: #dbeafe; color: #1e40af; }
 .tag.type.ng { background: #fee2e2; color: #991b1b; }
+.tag.type.detection { background: #ede9fe; color: #6d28d9; }
 .tag.type.unknown { background: var(--background); color: var(--text-muted); }
+.tag.object-count { background: #e0f2fe; color: #0369a1; }
+
+/* 12082026 - KIET - Hiển thị trạng thái tải và count theo class của kết quả OD. */
+.dataset-result-message {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.dataset-class-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
 
 .add-image-btn {
   height: 100%;
