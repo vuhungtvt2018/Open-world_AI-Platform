@@ -12,7 +12,7 @@ class YOLODetector(BaseVisionTask):
         """
         15082026 - KHAI - Add to(device) to model
         """
-        self.model = YOLO(self.model_path).to(self.device)
+        self.model = YOLO(self.model_path).to(self.device.lower())
         # Warmup
         self.model.predict(np.zeros((640, 640, 3), dtype=np.uint8), imgsz=640, verbose=False)
 
