@@ -81,11 +81,14 @@ class AnomalyInferencer(BaseVisionTask):
     def predict(
         self,
         preprocessed_data: Tuple[np.ndarray, np.ndarray, np.ndarray]
-    ) -> Tuple[float, np.ndarray, np.ndarray, Optional[np.ndarray]]:
+    ) -> Tuple[float, np.ndarray, np.ndarray, np.ndarray, Optional[np.ndarray]]:
         """Đưa dữ liệu qua mạng neural để lấy raw output"""
         crop_rs, crop_rgb, crop_bgr = preprocessed_data
         if crop_rgb is None or crop_rgb.size == 0:
-            return 0.0, crop_rs, crop_rgb, None
+            """
+            15082026 - KHAI - Fix output for the case where crop is empty
+            """
+            return 0.0, crop_rs, crop_rgb, crop_bgr, None
 
         preds = self.model.predict(image=crop_rgb)
 

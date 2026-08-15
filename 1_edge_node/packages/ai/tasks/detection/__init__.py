@@ -9,7 +9,10 @@ class YOLODetector(BaseVisionTask):
     """YOLO-based object detector (Detection, Segmentation, Pose)."""
 
     def load_model(self) -> None:
-        self.model = YOLO(self.model_path)
+        """
+        15082026 - KHAI - Add to(device) to model
+        """
+        self.model = YOLO(self.model_path).to(self.device)
         # Warmup
         self.model.predict(np.zeros((640, 640, 3), dtype=np.uint8), imgsz=640, verbose=False)
 
