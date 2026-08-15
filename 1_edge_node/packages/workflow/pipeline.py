@@ -43,13 +43,19 @@ class Pipeline:
         self.dir_keypoint_crops = kp_crop
         self.dir_masks_keypoint_crops = mk_crop
 
+        """
+        15082026 - KHAI - Add device to detector
+        """
         print("[PIPELINE] Khởi tạo mô hình YOLODetector Segmentation...")
-        self.detector = YOLODetector(self.cfg.MODEL_PATH)
+        self.detector = YOLODetector(self.cfg.MODEL_PATH, self.cfg.ANOMALY_DEVICE)
         
         self.keypoint_detection = None
         if self.cfg.KEYPOINT_DETECTION:
+            """
+            15082026 - KHAI - Add device to keypoint detection model
+            """
             print("[PIPELINE] Khởi tạo mô hình YOLODetector Keypoints...")
-            self.keypoint_detection = YOLODetector(self.cfg.KEYPOINTS_MODEL_PATH)
+            self.keypoint_detection = YOLODetector(self.cfg.KEYPOINTS_MODEL_PATH, self.cfg.ANOMALY_DEVICE)
 
         print("[PIPELINE] Khởi tạo mô hình Anomaly (Anomalib)...")
         anom_cfg = AnomalyConfig(
