@@ -1,4 +1,5 @@
 import cv2
+import math
 import numpy as np
 from typing import List
 
@@ -12,18 +13,39 @@ def draw_preview(frame, display_scale: float, status: str, saved_count: int):
     return disp
 
 # ghép các crop đã vẽ bbox
-
-def concat_anomaly_crops(anomaly_crop_views: List[np.ndarray], target_h: int = 300):
+"""
+16082026 - KHAI - Arrange cropped views as grids
+"""
+def concat_anomaly_crops(anomaly_crop_views: List[np.ndarray], target_h: int = 300) -> np.ndarray:
     if len(anomaly_crop_views) == 0:
         return np.zeros((200, 200, 3), dtype=np.uint8)
-    resized = []
-    for imgc in anomaly_crop_views:
-        if imgc is None or imgc.size == 0:
-            continue
-        scale = target_h / max(1, imgc.shape[0])
-        new_w = max(1, int(imgc.shape[1] * scale))
-        img_resz = cv2.resize(imgc, (new_w, target_h))
-        resized.append(img_resz)
-    if len(resized) == 0:
+
+    valid_views = [img for img in anomaly_crop_views if img is not None and img.size > 0]
+    num_views = len(valid_views)
+    if num_views == 0:
         return np.zeros((200, 200, 3), dtype=np.uint8)
-    return cv2.hconcat(resized)
+
+    if num_views <= 3:
+        cols = num_views
+        rows = 1
+    else:
+        cols = math.ceil(math.sqrt(num_views))
+        rows = math.ceil(num_views / cols)
+
+    avg_aspect_ratio = sum(img.shape[1] / max(1, img.shape[0]) for img in valid_views) / num_views
+    target_w = max(1, int(target_h * avg_aspect_ratio))
+
+    resized = [cv2.resize(img, (target_w, target_h)) for img in valid_views]
+
+    total_slots = rows * cols
+    if len(resized) < total_slots:
+        pad_count = total_slots - len(resized)
+        blank = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+        resized.extend([blank] * pad_count)
+
+    grid_rows = []
+    for r in range(rows):
+        row_imgs = resized[r * cols : (r + 1) * cols]
+        grid_rows.append(cv2.hconcat(row_imgs))
+
+    return cv2.vconcat(grid_rows)

@@ -25,7 +25,8 @@ from packages.core.config import AppConfig
 from packages.workflow.pipeline import Pipeline
 from packages.camera import RTSP_Threaded_Camera, Basler_Threaded_Camera
 from packages.utils.utils import (ts, union_box, pad_and_clip_box, 
-                     arrow_angle, rotate_image, transform_points, need_clean, clean_data)
+                     arrow_angle, rotate_image, transform_points, need_clean, clean_data,
+                     transform_bbox_to_original_coords)
 from packages.utils.visualize import concat_anomaly_crops
 from services.database.session import init_db, SessionLocal
 from services.database.crud import create_inspection_record
@@ -232,9 +233,12 @@ class WebInference:
                 center_x, center_y = (x_min + x_max) // 2, (y_min + y_max) // 2
                 max_val = max(abs(x_max - x_min), abs(y_max - y_min))
                 
-                cx1, cy1, cx2, cy2 = center_x - max_val // 2, center_y - max_val // 2, center_x + max_val // 2, center_y + max_val // 2
-                crop = rotated_frame[max(0,cy1):cy2, max(0,cx1):cx2]
-                crop_mask = rotated_mask[max(0,cy1):cy2, max(0,cx1):cx2]
+                crop_x1 = max(0, center_x - max_val // 2)
+                crop_y1 = max(0, center_y - max_val // 2)
+                crop_x2 = center_x + max_val // 2
+                crop_y2 = center_y + max_val // 2
+                crop = rotated_frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                crop_mask = rotated_mask[crop_y1:crop_y2, crop_x1:crop_x2]
 
                 if crop.size == 0 or crop_mask.size == 0:
                     continue
@@ -277,10 +281,22 @@ class WebInference:
                         08082026 - KHAI - Refactor code to adhere to modified Pipeline
                         """
                         cx1, cy1, cx2, cy2 = int(a.xmin), int(a.ymin), int(a.xmax), int(a.ymax)
+                        """
+                        16082026 - KHAI - Convert bbox in crop to bbox in original
+                        """
+                        bbox_in_crop = [int(cx1), int(cy1), int(cx2), int(cy2)]
+                        crop_origin = (crop_x1, crop_y1)
+                        bbox_in_original = transform_bbox_to_original_coords(
+                            bbox_in_crop,
+                            M,
+                            crop_origin,
+                            frame.shape,
+                        )
                         anomalies_full.append({
                             "k": ak,
-                            "bbox_full": [int(cx1), int(cy1), int(cx2), int(cy2)],
-                            "bbox_in_object_crop": [int(cx1), int(cy1), int(cx2), int(cy2)],
+                            "bbox_full": bbox_in_original,
+                            "bbox_in_object_crop": bbox_in_crop,
+                            "bbox_in_original": bbox_in_original,
                         })
                         anom_crop = crop[cy1:cy2, cx1:cx2]
                         if anom_crop.size != 0:
@@ -365,51 +381,48 @@ class WebInference:
             if object_index >= len(mapping_object):
                 continue
 
-            x1, y1, x2, y2 = map(
-                int,
-                mapping_object[object_index]["seg_box"],
-            )
-
+            """
+            16082026 - KHAI - Convert bbox in crop to bbox in original
+            """
             is_ng = obj["is_ng"]
-            color = (0, 0, 255) if is_ng else (0, 255, 0)
-            status = "NG" if is_ng else "OK"
-            label = f"Object {object_index}: {status}"
+            if is_ng and obj.get("anomalies"):
+                for ak, anomaly in enumerate(obj["anomalies"], start=1):
+                    x1, y1, x2, y2 = anomaly.get("bbox_in_original", [0, 0, 0, 0])
+                    cv2.rectangle(
+                        overall_vis,
+                        (x1, y1),
+                        (x2, y2),
+                        (0, 0, 255),
+                        3,
+                    )
 
-            cv2.rectangle(
-                overall_vis,
-                (x1, y1),
-                (x2, y2),
-                color,
-                3,
-            )
-
-            (text_width, text_height), baseline = cv2.getTextSize(
-                label,
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                2,
-            )
-
-            label_top = max(0, y1 - text_height - baseline - 8)
-
-            cv2.rectangle(
-                overall_vis,
-                (x1, label_top),
-                (x1 + text_width + 10, y1),
-                color,
-                -1,
-            )
-
-            cv2.putText(
-                overall_vis,
-                label,
-                (x1 + 5, y1 - baseline - 4),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (255, 255, 255),
-                2,
-                cv2.LINE_AA,
-            )
+                    label = anomaly.get("cls_label") or f"NG{ak}"
+                    if anomaly.get("cls_similarity") is not None:
+                        label = f"{label} ({float(anomaly['cls_similarity']):.2f})"
+                    (text_width, text_height), baseline = cv2.getTextSize(
+                        label,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        2,
+                    )
+                    label_top = max(0, y1 - text_height - baseline - 8)
+                    cv2.rectangle(
+                        overall_vis,
+                        (x1, label_top),
+                        (x1 + text_width + 10, y1),
+                        (0, 0, 255),
+                        -1,
+                    )
+                    cv2.putText(
+                        overall_vis,
+                        label,
+                        (x1 + 5, y1 - baseline - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (255, 255, 255),
+                        2,
+                        cv2.LINE_AA,
+                    )
         
         overall_name = f"OVERALL_{name}.jpg"
         overall_path = os.path.join(self.pipeline.session_root, overall_name)

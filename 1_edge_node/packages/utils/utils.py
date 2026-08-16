@@ -148,6 +148,38 @@ def transform_points(points, M):
     transformed = M.dot(pts_ones.T).T
     return transformed
 
+"""
+16082026 - KHAI - Add function to convert bbox in cropped images to coordinates in original image
+"""
+def transform_bbox_to_original_coords(bbox, rotation_matrix, crop_origin=(0, 0), frame_shape=None):
+    """Map a bbox from the rotated crop back to original image coordinates."""
+    x1, y1, x2, y2 = [float(v) for v in bbox]
+    ox, oy = crop_origin
+    pts = np.array([
+        [x1 + ox, y1 + oy],
+        [x2 + ox, y1 + oy],
+        [x2 + ox, y2 + oy],
+        [x1 + ox, y2 + oy],
+    ], dtype=np.float32).reshape(-1, 1, 2)
+
+    inv_M = cv2.invertAffineTransform(rotation_matrix)
+    transformed = cv2.transform(pts, inv_M).reshape(-1, 2)
+
+    x_min = int(np.floor(transformed[:, 0].min()))
+    y_min = int(np.floor(transformed[:, 1].min()))
+    x_max = int(np.ceil(transformed[:, 0].max()))
+    y_max = int(np.ceil(transformed[:, 1].max()))
+
+    if frame_shape is not None:
+        h, w = frame_shape[:2]
+        x_min = max(0, min(w - 1, x_min))
+        y_min = max(0, min(h - 1, y_min))
+        x_max = max(0, min(w - 1, x_max))
+        y_max = max(0, min(h - 1, y_max))
+
+    return [x_min, y_min, x_max, y_max]
+
+
 def union_box(box1, box2):
     """Lấy box chung từ 2 box"""
     x1 = min(int(box1[0]), int(box2[0]))
