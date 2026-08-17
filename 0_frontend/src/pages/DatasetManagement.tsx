@@ -134,15 +134,11 @@ export default function DatasetManagement() {
       }
     };
     
-    // Fetch immediately on mount
+    // 15082026 - KIET - Chỉ tải một lần khi mở màn hình để tránh gọi API liên tục.
     fetchDataset();
-    
-    // Auto reload every 5 seconds
-    const intervalId = setInterval(fetchDataset, 5000);
 
     return () => {
       isMounted = false;
-      clearInterval(intervalId);
     };
   }, []);
 

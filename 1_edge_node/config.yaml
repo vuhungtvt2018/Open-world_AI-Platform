@@ -40,4 +40,4 @@ KEYPOINTS_SCORE_THRESHOLD: 0.5
 DISK_CLEANUP_DAYS: 15.0
 DISK_CLEANUP_INTERVAL_HOURS: 24.0
 # 11082026 - KIET - Khai báo checkpoint dùng cho Object Detection counting.
-MODEL_PATH:  C:\Users\IVS-1437\Desktop\PlatformAI\Open-world_AI-Platform\best.pt
+MODEL_PATH:  ../best.pt
