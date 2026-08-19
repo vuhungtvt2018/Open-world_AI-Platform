@@ -6,6 +6,13 @@ import sqlite3
 import yaml
 from datetime import datetime
 import json
+import glob
+import sys
+
+# 19082026 - KHANH - Cau hinh UTF-8 de worker khong bi crash khi in log tieng Viet tren Windows.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 # Đọc cấu hình hoàn toàn độc lập
 def load_config():
@@ -18,8 +25,22 @@ import base64
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), cfg["DB_PATH"]))
 EDGE_NODE_ID = cfg.get("EDGE_NODE_ID", "EDGE_001")
+# 19082026 - KHANH - Lay thu muc captures tu vi tri SQLite de tim dung file anh inspection.
+CAPTURE_ROOT = os.path.dirname(DB_PATH)
 SYNC_DEFECT_IMAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../1_edge_node/sync_defect_image"))
 os.makedirs(SYNC_DEFECT_IMAGE_DIR, exist_ok=True)
+
+# 19082026 - KHANH - Resolve ten anh trong cac thu muc session truoc khi upload len Cloud Server.
+def resolve_capture_path(image_path):
+    if not image_path:
+        return None
+    if os.path.isabs(image_path) and os.path.isfile(image_path):
+        return image_path
+    direct_path = os.path.join(CAPTURE_ROOT, image_path)
+    if os.path.isfile(direct_path):
+        return direct_path
+    matches = glob.glob(os.path.join(CAPTURE_ROOT, "**", os.path.basename(image_path)), recursive=True)
+    return matches[0] if matches else None
 
 def get_last_sync_time(cursor, key="last_inspection_sync_time"):
     cursor.execute("SELECT value FROM sync_states WHERE key = ?", (key,))
@@ -80,16 +101,16 @@ def sync_job():
             for record in records:
                 rec_id, rec_ts, rec_img, rec_ng_detected, rec_latency, rec_created = record
                 
-                # Fetch objects for this record
-                cursor.execute("SELECT id, object_index, bbox, score, is_ng, overlap_ratio, crop_image FROM bolt_objects WHERE record_id = ?", (rec_id,))
+                # 19082026 - KHANH - Doc object tu bang inspection_objects theo schema SQLite hien tai.
+                cursor.execute("SELECT id, object_index, bbox, score, is_ng, overlap_ratio, crop_image FROM inspection_objects WHERE record_id = ?", (rec_id,))
                 objects = cursor.fetchall()
                 
                 object_details = []
                 for obj in objects:
                     obj_id, object_index, bbox, score, is_ng, overlap_ratio, crop_image = obj
                     
-                    # Fetch anomalies
-                    cursor.execute("SELECT id, bbox_full, bbox_in_object_crop, defect_class, similarity FROM anomaly_details WHERE bolt_id = ?", (obj_id,))
+                    # 19082026 - KHANH - Doc anomaly bang khoa object_id theo schema SQLite hien tai.
+                    cursor.execute("SELECT id, bbox_full, bbox_in_object_crop, defect_class, similarity FROM anomaly_details WHERE object_id = ?", (obj_id,))
                     anomalies = cursor.fetchall()
                     
                     anomaly_details = []
@@ -129,9 +150,11 @@ def sync_job():
                     try:
                         # Đính kèm hình ảnh
                         files = None
-                        if rec_img and os.path.exists(rec_img):
+                        # 19082026 - KHANH - Tim duong dan anh thuc te thay vi su dung ten file tu database.
+                        resolved_image = resolve_capture_path(rec_img)
+                        if resolved_image:
                             # Mở file ở chế độ đọc binary
-                            files = {'file': (os.path.basename(rec_img), open(rec_img, 'rb'), 'image/jpeg')}
+                            files = {'file': (os.path.basename(resolved_image), open(resolved_image, 'rb'), 'image/jpeg')}
                             
                         print(f"[SYNC WORKER] Pushing record {rec_id} to Server...")
                         r = requests.post(
@@ -144,18 +167,20 @@ def sync_job():
                         if files:
                             files['file'][1].close() # Đóng file
                             
-                        if not (200 <= r.status_code < 300):
-                            print(f"[SYNC WORKER] HTTP {r.status_code}: {r.text}")
-                        else:
-                            print(f"[SYNC WORKER] Thang cong dong bo record {rec_id}")
+                        # 19082026 - KHANH - Chi chap nhan dong bo khi HTTP va payload deu xac nhan thanh cong.
+                        r.raise_for_status()
+                        response_data = r.json()
+                        if response_data.get("status") != "success":
+                            raise RuntimeError(f"Server rejected record: {response_data}")
+                        print(f"[SYNC WORKER] Thanh cong dong bo record {rec_id}")
                     except Exception as e:
                         print(f"[SYNC WORKER] API Error: {e}")
                         if 'files' in locals() and files and not files['file'][1].closed:
                             files['file'][1].close()
                         raise e # Dừng để retry sau
                         
-                # Cập nhật thời gian thành công
-                set_last_sync_time(conn, cursor, rec_created)
+                # 19082026 - KHANH - Chi cap nhat moc sync sau khi Cloud Server xac nhan thanh cong.
+                    set_last_sync_time(conn, cursor, rec_created)
                 
             # Đồng bộ hướng xuống (Server -> Edge) (Cấu hình)
             if cfg.get("API_SYNC_ENABLE") and cfg.get("API_SYNC_DOWN_URL"):
@@ -247,7 +272,8 @@ def sync_job():
                 
         except Exception as e:
             # Lỗi mạng hoặc DB bị lock, thử lại sau
-            pass
+            # 19082026 - KHANH - Hien thi loi chu ky sync de tranh worker that bai am tham.
+            print(f"[SYNC WORKER] Sync cycle failed: {e}")
         finally:
             if 'conn' in locals():
                 conn.close()
