@@ -258,11 +258,14 @@ class WebInference:
                             else:
                                 label_text = a['cls_label']
                                 
-                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 1.25, 2)
+                        """
+                        19082026 - KHAI - Increase font size for label in crop images
+                        """
+                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 3, 2)
                         tx1, ty1 = cx1, max(0, cy1 - th - 6)
                         tx2, ty2 = cx1 + tw + 8, cy1
                         cv2.rectangle(crop_labeled, (tx1, ty1), (tx2, ty2), (0, 0, 255), -1)
-                        cv2.putText(crop_labeled, label_text, (cx1 + 3, cy1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 1.25,
+                        cv2.putText(crop_labeled, label_text, (cx1 + 3, cy1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 3,
                                     (255, 255, 255), 2, cv2.LINE_AA)
 
                 per_objects.append({
@@ -317,13 +320,16 @@ class WebInference:
                         3,
                     )
 
+                    """
+                    19082026 - KHAI - Increase font size for overall image
+                    """
                     label = anomaly.get("cls_label") or f"NG{ak}"
                     if anomaly.get("cls_similarity") is not None:
                         label = f"{label} ({float(anomaly['cls_similarity']):.2f})"
                     (text_width, text_height), baseline = cv2.getTextSize(
                         label,
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
+                        3,
                         2,
                     )
                     label_top = max(0, y1 - text_height - baseline - 8)
@@ -339,7 +345,7 @@ class WebInference:
                         label,
                         (x1 + 5, y1 - baseline - 4),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.7,
+                        3,
                         (255, 255, 255),
                         2,
                         cv2.LINE_AA,
