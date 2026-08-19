@@ -1,8 +1,0 @@
-# Cấu hình riêng cho Sync Services
-DB_PATH: "../1_edge_node/captures/visual_inspection_edge.db"
-API_SYNC_ENABLE: true
-API_SYNC_UP_URL: "http://127.0.0.1:8031/api/sync/up"
-API_SYNC_DOWN_URL: "http://127.0.0.1:8031/api/sync/down"
-API_SYNC_LIBRARY_DOWN_URL: "http://127.0.0.1:8031/api/sync/library/down"
-PRODUCT_NAME: "sp1"
-EDGE_NODE_ID: "EDGE_001"

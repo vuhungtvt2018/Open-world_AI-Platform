@@ -1,1 +1,0 @@
-"""OpenVINO inference engine."""
