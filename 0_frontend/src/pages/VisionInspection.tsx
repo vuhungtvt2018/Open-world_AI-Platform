@@ -17,8 +17,16 @@ import './VisionInspection.css';
 
 const API_BASE_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000';
 
-type InputMode = 'folder' | 'stream' | 'basler';
+type InputMode = 'folder' | 'camera';
 type TaskMode = 'inspection' | 'detection';
+
+interface ConfiguredCamera {
+  camera_id: string;
+  name: string;
+  source_type: 'rtsp' | 'basler';
+  assigned_task: TaskMode | null;
+  status: 'disconnected' | 'connecting' | 'online' | 'error';
+}
 
 interface InferenceMetrics {
   latency_ms?: number;
@@ -56,7 +64,7 @@ interface HistoryRecord {
   counts_by_class?: Record<string, number>;
 }
 
-const DETECTION_CLASSES = ['screw', 'washer', 'wood_screw'];
+const DETECTION_CLASSES = ['screw', 'washer', 'wood_screw']; //har nữa chỉnh sau
 
 // 12082026 - KIET - Hiển thị màn hình Inspection và Object Detection trên Edge UI.
 export default function VisionInspection() {
@@ -67,6 +75,8 @@ export default function VisionInspection() {
   const [taskMode, setTaskMode] = useState<TaskMode>('detection');
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [selectedImage, setSelectedImage] = useState('');
+  const [configuredCameras, setConfiguredCameras] = useState<ConfiguredCamera[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState('');
 
   // 12082026 - KIET - Tải lịch sử inference để hiển thị theo AI task mode.
   const fetchHistory = useCallback(async () => {
@@ -103,39 +113,61 @@ export default function VisionInspection() {
     }
   }, []);
 
+  // 19082026 - KIET - Tải camera đã config ở Live Stream để dùng làm input inference.
+  const fetchConfiguredCameras = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/cameras`, { cache: 'no-store' });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Failed to fetch configured cameras');
+      }
+
+      const cameras: ConfiguredCamera[] = data.cameras || [];
+      setConfiguredCameras(cameras);
+      setSelectedCameraId((currentCameraId) => {
+        if (cameras.some((camera) => camera.camera_id === currentCameraId)) {
+          return currentCameraId;
+        }
+
+        return cameras.find((camera) => camera.assigned_task === 'detection')?.camera_id
+          || cameras[0]?.camera_id
+          || '';
+      });
+    } catch (error) {
+      console.error('Failed to fetch configured cameras:', error);
+    }
+  }, []);
+
   useEffect(() => {
     // 12082026 - KIET - Đồng bộ dữ liệu Edge API khi màn hình được mở lần đầu.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchHistory();
     fetchImages();
-  }, [fetchHistory, fetchImages]);
+    fetchConfiguredCameras();
+  }, [fetchConfiguredCameras, fetchHistory, fetchImages]);
 
-  // 12082026 - KIET - Đổi nguồn input giữa ảnh upload, RTSP stream và Basler camera.
+  // 19082026 - KIET - Đổi input giữa ảnh upload và camera đã config ở Live Stream.
   const handleInputModeChange = async (mode: InputMode) => {
-    try {
-      const targetCam = mode === 'basler' ? '1' : 'default';
-      const response = await fetch(
-        `${API_BASE_URL}/set-mode/${mode}?cam=${targetCam}`,
-        { method: 'POST' },
-      );
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Failed to change input mode');
-      }
-
-      setInputMode(mode);
-      setLatestResult(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      alert(`Failed to change input mode: ${message}`);
+    if (mode === 'camera') {
+      // 19082026 - KIET - Refresh trạng thái camera mỗi lần chọn Camera nhưng không polling nền.
+      await fetchConfiguredCameras();
     }
+
+    setInputMode(mode);
+    setLatestResult(null);
   };
 
   // 12082026 - KIET - Đổi AI task mode và xóa kết quả cũ trên giao diện.
   const handleTaskModeChange = (mode: TaskMode) => {
     setTaskMode(mode);
     setLatestResult(null);
+
+    // 19082026 - KIET - Ưu tiên camera đã được gán đúng task từ Live Stream config.
+    const assignedCamera = configuredCameras.find((camera) => camera.assigned_task === mode);
+    if (assignedCamera) {
+      setSelectedCameraId(assignedCamera.camera_id);
+    }
   };
 
   // 12082026 - KIET - Chọn ảnh input đang được giữ trên RAM của Edge API.
@@ -190,10 +222,10 @@ export default function VisionInspection() {
     setIsInspecting(true);
 
     try {
-      const targetCam = inputMode === 'basler' ? '1' : 'default';
+      const targetCam = inputMode === 'camera' ? selectedCameraId : 'default';
       const endpoint = taskMode === 'detection' ? '/detect' : '/inspect';
       const response = await fetch(
-        `${API_BASE_URL}${endpoint}?cam=${targetCam}`,
+        `${API_BASE_URL}${endpoint}?cam=${encodeURIComponent(targetCam)}`,
         { method: 'POST' },
       );
       const result: InferenceResult = await response.json();
@@ -216,8 +248,15 @@ export default function VisionInspection() {
     .filter((item) => (item.task_type || 'inspection') === taskMode)
     .slice(0, 5);
 
-  const inputImage = inputMode === 'stream' || inputMode === 'basler'
-    ? `${API_BASE_URL}/video-feed?cam=${inputMode === 'basler' ? '1' : 'default'}`
+  const selectedConfiguredCamera = configuredCameras.find(
+    (camera) => camera.camera_id === selectedCameraId,
+  );
+
+  // 19082026 - KIET - Chỉ mở MJPEG stream khi camera config đang online hoặc connecting.
+  const inputImage = inputMode === 'camera'
+    && selectedCameraId
+    && ['online', 'connecting'].includes(selectedConfiguredCamera?.status || '')
+    ? `${API_BASE_URL}/video-feed?cam=${encodeURIComponent(selectedCameraId)}&fps=15`
     : selectedImage
       ? `${API_BASE_URL}/images/${selectedImage}`
       : null;
@@ -241,7 +280,7 @@ export default function VisionInspection() {
                   className={`mode-btn ${taskMode === 'detection' ? 'active' : ''}`}
                   onClick={() => handleTaskModeChange('detection')}
                 >
-                  <Boxes size={14} /> Object Detection
+                  <Boxes size={14} /> Object Counting
                 </button>
                 <button
                   className={`mode-btn ${taskMode === 'inspection' ? 'active' : ''}`}
@@ -264,10 +303,10 @@ export default function VisionInspection() {
                   <ImageIcon size={14} /> Folder Mode
                 </button>
                 <button
-                  className={`mode-btn ${inputMode === 'basler' ? 'active' : ''}`}
-                  onClick={() => handleInputModeChange('basler')}
+                  className={`mode-btn ${inputMode === 'camera' ? 'active' : ''}`}
+                  onClick={() => handleInputModeChange('camera')}
                 >
-                  <Play size={14} /> Basler Camera
+                  <Play size={14} /> Camera
                 </button>
               </div>
             </div>
@@ -277,7 +316,14 @@ export default function VisionInspection() {
         <button
           className={`inspect-btn ${isInspecting ? 'loading' : ''}`}
           onClick={handleInference}
-          disabled={isInspecting || (inputMode === 'folder' && !selectedImage)}
+          disabled={
+            isInspecting
+            || (inputMode === 'folder' && !selectedImage)
+            || (
+              inputMode === 'camera'
+              && (!selectedCameraId || selectedConfiguredCamera?.status !== 'online')
+            )
+          }
         >
           {isInspecting ? (
             'Analyzing...'

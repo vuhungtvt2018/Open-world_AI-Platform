@@ -95,6 +95,31 @@ class AIModel(Base):
     file_path: Mapped[str] = mapped_column(String(255))
     speed_ms: Mapped[str] = mapped_column(String(20), nullable=True)
 
+
+class CameraConfig(Base):
+    """
+    19082026 - KIET - Lưu cấu hình RTSP/Basler và tác vụ được gán cho từng camera.
+    """
+
+    __tablename__ = "camera_configs"
+
+    camera_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str] = mapped_column(String(150))
+    source_type: Mapped[str] = mapped_column(String(20), index=True)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    assigned_task: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[str] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[str] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
 class QCProductPhotoLibrary(Base):
     """Metadata cho CSDL mẫu của thư viện Vector Search (Edge ko lưu embedding)"""
     __tablename__ = "qc_product_photo_library"

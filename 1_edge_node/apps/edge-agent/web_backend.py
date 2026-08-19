@@ -17,20 +17,32 @@ import shutil
 import psutil
 import threading
 from collections import Counter
-from fastapi import FastAPI, Response, UploadFile, File
+from typing import Literal
+from fastapi import FastAPI, Response, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 
 # Import logic (New DAG Architecture)
 from packages.core.config import AppConfig
 from packages.workflow.pipeline import Pipeline
-from packages.camera import RTSP_Threaded_Camera, Basler_Threaded_Camera
+from packages.camera import (
+    RTSP_Threaded_Camera,
+    Basler_Threaded_Camera,
+    discover_basler_cameras,
+)
 from packages.utils.utils import (ts, union_box, pad_and_clip_box, 
                      arrow_angle, rotate_image, transform_points, need_clean, clean_data)
 from packages.utils.visualize import concat_anomaly_crops
 from services.database.session import init_db, SessionLocal
-from services.database.crud import create_inspection_record
+from services.database.crud import (
+    create_inspection_record,
+    get_camera_config,
+    list_camera_configs,
+    update_camera_config,
+    upsert_camera_config,
+)
 from packages.utils.cleaner import run_cleaner_daemon
 from services.database.models import InspectionRecord
 from packages.ai.engines.pytorch import UltralyticsBackend
@@ -50,6 +62,43 @@ cfg = AppConfig.from_yaml(os.path.join(str(ROOT), "config.yaml"))
 
 UPLOAD_DIR = os.path.join(str(ROOT), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+class CameraConfigRequest(BaseModel):
+    """
+    19082026 - KIET - Chuẩn hóa cấu hình RTSP/Basler gửi từ Live Stream UI.
+    """
+
+    camera_id: str = Field(
+        min_length=1,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    name: str = Field(min_length=1, max_length=150)
+    source_type: Literal["rtsp", "basler"]
+    source_url: str | None = None
+    serial_number: str | None = None
+    assigned_task: Literal["detection", "inspection"] | None = None
+    enabled: bool = False
+    width: int | None = None
+    height: int | None = None
+    fps: float | None = None
+
+
+class CameraAssignmentRequest(BaseModel):
+    """
+    19082026 - KIET - Chuẩn hóa task được gán cho camera nhưng giữ API task riêng biệt.
+    """
+
+    assigned_task: Literal["detection", "inspection"] | None = None
+
+
+class RtspTestRequest(BaseModel):
+    """
+    19082026 - KIET - Chuẩn hóa RTSP URL cần kiểm tra trước khi lưu camera.
+    """
+
+    source_url: str = Field(min_length=1, max_length=500)
 
 def seed_models():
     from services.database.models import AIModel
@@ -84,6 +133,8 @@ def seed_models():
 def start_background_tasks():
     init_db()
     seed_models()
+    # 19082026 - KIET - Khôi phục camera đã enable sau khi database sẵn sàng.
+    inference_engine.load_saved_camera_configs()
     run_cleaner_daemon(
         captures_dir=cfg.CAPTURE_DIR,
         days_to_keep=cfg.DISK_CLEANUP_DAYS,
@@ -134,41 +185,238 @@ class WebInference:
 
         # 11082026 - KIET - Bảo vệ model trước nhiều request inference đồng thời.
         self.od_lock = threading.Lock()
+
+        # 19082026 - KIET - Bảo vệ Inspection pipeline khi nhiều camera gọi cùng task.
+        self.inspection_lock = threading.Lock()
         
         # Khởi tạo Multi-Camera Stream
         self.cameras = {} # id -> Camera_Instance
         self.input_mode = {} # id -> "stream", "basler", "folder"
+        # 19082026 - KIET - Lưu cấu hình và trạng thái runtime độc lập theo camera ID.
+        self.camera_configs = {}
+        self.camera_status = {}
+        self.camera_lock = threading.RLock()
         self.current_frame = None
         self.current_image_name = "in_memory_image"
-        
+
+    def register_camera_config(self, camera_config: dict) -> None:
+        """
+        19082026 - KIET - Đăng ký cấu hình camera vào runtime registry.
+        """
+
+        camera_id = str(camera_config["camera_id"])
+        with self.camera_lock:
+            self.camera_configs[camera_id] = dict(camera_config)
+            self.camera_status.setdefault(
+                camera_id,
+                {"status": "disconnected", "error": None},
+            )
+
+    def load_saved_camera_configs(self) -> None:
+        """
+        19082026 - KIET - Load camera từ database và tự connect các camera đã enable.
+        """
+
+        for camera_config in list_camera_configs():
+            self.register_camera_config(camera_config)
+            if not camera_config.get("enabled", False):
+                continue
+
+            try:
+                self.connect_camera(camera_config["camera_id"])
+            except Exception as exc:
+                with self.camera_lock:
+                    self.camera_status[camera_config["camera_id"]] = {
+                        "status": "error",
+                        "error": str(exc),
+                    }
+
+    def connect_camera(self, camera_id: str) -> None:
+        """
+        19082026 - KIET - Kết nối đúng RTSP URL hoặc Basler serial theo camera ID.
+        """
+
+        camera_id = str(camera_id)
+        with self.camera_lock:
+            camera_config = self.camera_configs.get(camera_id)
+
+        if camera_config is None:
+            raise KeyError(f"Camera config not found: {camera_id}")
+
+        self.disconnect_camera(camera_id, preserve_status=True)
+        with self.camera_lock:
+            self.camera_status[camera_id] = {
+                "status": "connecting",
+                "error": None,
+            }
+
+        try:
+            source_type = camera_config["source_type"]
+            width = camera_config.get("width") or self.cfg.CAM_WIDTH
+            height = camera_config.get("height") or self.cfg.CAM_HEIGHT
+
+            if source_type == "rtsp":
+                source = camera_config.get("source_url")
+                if not source:
+                    raise ValueError(f"RTSP URL is required: {camera_id}")
+                if str(source).isdigit():
+                    source = int(source)
+
+                camera = RTSP_Threaded_Camera(
+                    source,
+                    width=width,
+                    height=height,
+                )
+                input_mode = "stream"
+            elif source_type == "basler":
+                camera = Basler_Threaded_Camera(
+                    serial_number=camera_config.get("serial_number"),
+                    width=width,
+                    height=height,
+                )
+                input_mode = "basler"
+            else:
+                raise ValueError(f"Unsupported camera source type: {source_type}")
+
+            with self.camera_lock:
+                self.cameras[camera_id] = camera
+                self.input_mode[camera_id] = input_mode
+                self.camera_status[camera_id] = {
+                    "status": "connecting",
+                    "error": None,
+                }
+        except Exception as exc:
+            with self.camera_lock:
+                self.camera_status[camera_id] = {
+                    "status": "error",
+                    "error": str(exc),
+                }
+            raise
+
+    def disconnect_camera(self, camera_id: str, preserve_status: bool = False) -> None:
+        """
+        19082026 - KIET - Dừng đúng camera instance mà không ảnh hưởng camera khác.
+        """
+
+        camera_id = str(camera_id)
+        with self.camera_lock:
+            camera = self.cameras.pop(camera_id, None)
+            self.input_mode.pop(camera_id, None)
+
+        if camera is not None:
+            camera.stop()
+
+        if not preserve_status:
+            with self.camera_lock:
+                self.camera_status[camera_id] = {
+                    "status": "disconnected",
+                    "error": None,
+                }
+
+    def get_camera_status(self, camera_id: str) -> dict:
+        """
+        19082026 - KIET - Tổng hợp cấu hình và trạng thái frame thực tế của camera.
+        """
+
+        camera_id = str(camera_id)
+        with self.camera_lock:
+            camera_config = self.camera_configs.get(camera_id)
+            camera = self.cameras.get(camera_id)
+            runtime_status = dict(
+                self.camera_status.get(
+                    camera_id,
+                    {"status": "disconnected", "error": None},
+                )
+            )
+
+        if camera_config is None:
+            raise KeyError(f"Camera config not found: {camera_id}")
+
+        if camera is not None:
+            has_frame = getattr(camera, "frame", None) is not None
+            camera_error = getattr(camera, "last_error", None)
+            if camera_error:
+                runtime_status["status"] = "error"
+            elif has_frame:
+                runtime_status["status"] = "online"
+            else:
+                runtime_status["status"] = "connecting"
+            runtime_status["error"] = camera_error
+            runtime_status["last_frame_at"] = getattr(camera, "last_frame_at", None)
+        else:
+            runtime_status["last_frame_at"] = None
+
+        return {
+            **camera_config,
+            **runtime_status,
+        }
+
+    def list_camera_statuses(self) -> list[dict]:
+        """
+        19082026 - KIET - Trả trạng thái tất cả camera cho Live Stream UI.
+        """
+
+        with self.camera_lock:
+            camera_ids = list(self.camera_configs.keys())
+        return [self.get_camera_status(camera_id) for camera_id in camera_ids]
+
     def set_camera_mode(self, cam_id: str, mode: str):
+        """
+        19082026 - KIET - Giữ API set-mode cũ và ưu tiên cấu hình camera đã lưu.
+        """
+
+        cam_id = str(cam_id)
         if self.input_mode.get(cam_id) == mode:
             return
-            
-        if cam_id in self.cameras and self.cameras[cam_id] is not None:
-            self.cameras[cam_id].stop()
-            self.cameras.pop(cam_id)
-            
-        self.input_mode[cam_id] = mode
-        
-        if mode == "stream":
-            rtsp_val = self.cfg.RTSP_URL
-            if str(rtsp_val).isdigit():
-                rtsp_val = int(rtsp_val)
-            self.cameras[cam_id] = RTSP_Threaded_Camera(rtsp_val, width=self.cfg.CAM_WIDTH, height=self.cfg.CAM_HEIGHT)
-        elif mode == "basler":
-            from packages.camera.basler import Basler_Threaded_Camera
-            self.cameras[cam_id] = Basler_Threaded_Camera(width=self.cfg.CAM_WIDTH, height=self.cfg.CAM_HEIGHT)
+
+        if mode == "folder":
+            self.disconnect_camera(cam_id)
+            self.input_mode[cam_id] = "folder"
+            return
+
+        with self.camera_lock:
+            stored_config = self.camera_configs.get(cam_id)
+
+        if stored_config is None:
+            stored_config = {
+                "camera_id": cam_id,
+                "name": f"Camera {cam_id}",
+                "source_type": "basler" if mode == "basler" else "rtsp",
+                "source_url": str(self.cfg.RTSP_URL) if mode == "stream" else None,
+                "serial_number": None,
+                "assigned_task": None,
+                "enabled": False,
+                "width": self.cfg.CAM_WIDTH,
+                "height": self.cfg.CAM_HEIGHT,
+                "fps": None,
+            }
+            self.register_camera_config(stored_config)
+
+        self.connect_camera(cam_id)
 
     def get_frame(self, cam_id: str = "default"):
-        if self.input_mode.get(cam_id) in ["stream", "basler"] and cam_id in self.cameras:
-            frame = self.cameras[cam_id].read()
-            return frame
-        else:
-            # Lấy ảnh trực tiếp từ RAM (không đọc ổ cứng)
-            if self.current_frame is None:
+        """
+        19082026 - KIET - Lấy frame độc lập theo camera ID hoặc ảnh RAM ở folder mode.
+        """
+
+        cam_id = str(cam_id)
+        with self.camera_lock:
+            input_mode = self.input_mode.get(cam_id)
+            camera = self.cameras.get(cam_id)
+
+        if input_mode in ["stream", "basler"]:
+            if camera is None:
                 return None
-            return self.current_frame.copy()
+            frame = camera.read()
+            return frame
+
+        if input_mode not in (None, "folder") and cam_id != "default":
+            return None
+
+        # Lấy ảnh trực tiếp từ RAM (không đọc ổ cứng)
+        if self.current_frame is None:
+            return None
+        return self.current_frame.copy()
 
     def _count_predictions_by_class(self, predictions) -> dict[str, int]:
         """
@@ -546,9 +794,8 @@ def shutdown_inference_engine() -> None:
 
     inference_engine.od_backend.close()
 
-    for camera in inference_engine.cameras.values():
-        if camera is not None:
-            camera.stop()
+    for camera_id in list(inference_engine.cameras.keys()):
+        inference_engine.disconnect_camera(camera_id)
 
 @app.post("/upload")
 async def upload_image(file: UploadFile = File(...)):
@@ -568,7 +815,13 @@ async def upload_image(file: UploadFile = File(...)):
     return {"filename": dynamic_name, "images": [dynamic_name]}
 
 @app.get("/video-feed")
-async def video_feed(cam: str = "default"):
+async def video_feed(cam: str = "default", fps: float = 15.0):
+    """
+    19082026 - KIET - Stream đúng camera ID và giới hạn FPS để multi-camera không chiếm CPU quá mức.
+    """
+
+    frame_interval = 1.0 / min(max(fps, 1.0), 30.0)
+
     def gen_frames():
         while True:
             frame = inference_engine.get_frame(cam)
@@ -579,6 +832,7 @@ async def video_feed(cam: str = "default"):
                 frame_bytes = buffer.tobytes()
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                time.sleep(frame_interval)
             else:
                 time.sleep(0.03)
                 
@@ -613,9 +867,166 @@ async def set_mode(mode: str, cam: str = "default"):
         print(f"Error setting mode: {e}")
         raise HTTPException(status_code=500, detail=f"Camera Error: {str(e)}")
 
+
+@app.get("/api/cameras")
+def list_cameras():
+    """
+    19082026 - KIET - Trả danh sách camera đã cấu hình kèm trạng thái runtime.
+    """
+
+    return {"cameras": inference_engine.list_camera_statuses()}
+
+
+@app.get("/api/cameras/discover/basler")
+def discover_available_basler_cameras():
+    """
+    19082026 - KIET - Discovery Basler camera đang kết nối với Edge node.
+    """
+
+    try:
+        return {"cameras": discover_basler_cameras()}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Basler discovery failed: {exc}",
+        ) from exc
+
+
+@app.post("/api/cameras/test-rtsp")
+def test_rtsp_camera(request: RtspTestRequest):
+    """
+    19082026 - KIET - Kiểm tra RTSP/local source và đọc thử một frame trước khi lưu.
+    """
+
+    source: str | int = request.source_url
+    if request.source_url.isdigit():
+        source = int(request.source_url)
+
+    capture = cv2.VideoCapture()
+    try:
+        if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+            capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+        if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+            capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+
+        if not capture.open(source):
+            raise HTTPException(status_code=400, detail="Cannot open RTSP source")
+
+        ok, frame = capture.read()
+        if not ok or frame is None:
+            raise HTTPException(status_code=400, detail="RTSP opened but no frame received")
+
+        height, width = frame.shape[:2]
+        fps = capture.get(cv2.CAP_PROP_FPS)
+        return {
+            "available": True,
+            "width": width,
+            "height": height,
+            "fps": round(float(fps), 2) if fps > 0 else None,
+        }
+    finally:
+        capture.release()
+
+
+@app.post("/api/cameras")
+def save_camera_config(request: CameraConfigRequest):
+    """
+    19082026 - KIET - Lưu camera từ Live Stream UI và đăng ký vào runtime registry.
+    """
+
+    camera_data = request.model_dump()
+    if request.source_type == "rtsp" and not request.source_url:
+        raise HTTPException(status_code=400, detail="RTSP URL is required")
+    if request.source_type == "basler" and not request.serial_number:
+        raise HTTPException(status_code=400, detail="Basler serial number is required")
+
+    try:
+        saved_camera = upsert_camera_config(camera_data)
+        inference_engine.register_camera_config(saved_camera)
+        if saved_camera["enabled"]:
+            inference_engine.connect_camera(saved_camera["camera_id"])
+        else:
+            # 19082026 - KIET - Dừng instance cũ nếu camera được cập nhật về trạng thái disable.
+            inference_engine.disconnect_camera(saved_camera["camera_id"])
+        return inference_engine.get_camera_status(saved_camera["camera_id"])
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/cameras/{camera_id}/connect")
+def connect_configured_camera(camera_id: str):
+    """
+    19082026 - KIET - Connect một camera đã lưu mà không ảnh hưởng camera khác.
+    """
+
+    camera_config = get_camera_config(camera_id)
+    if camera_config is None:
+        raise HTTPException(status_code=404, detail="Camera config not found")
+
+    try:
+        inference_engine.register_camera_config(camera_config)
+        inference_engine.connect_camera(camera_id)
+        updated_camera = update_camera_config(camera_id, {"enabled": True})
+        if updated_camera is not None:
+            inference_engine.register_camera_config(updated_camera)
+        return inference_engine.get_camera_status(camera_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/cameras/{camera_id}/disconnect")
+def disconnect_configured_camera(camera_id: str):
+    """
+    19082026 - KIET - Disconnect một camera và giữ nguyên cấu hình để dùng lại.
+    """
+
+    if get_camera_config(camera_id) is None:
+        raise HTTPException(status_code=404, detail="Camera config not found")
+
+    inference_engine.disconnect_camera(camera_id)
+    updated_camera = update_camera_config(camera_id, {"enabled": False})
+    if updated_camera is not None:
+        inference_engine.register_camera_config(updated_camera)
+    return inference_engine.get_camera_status(camera_id)
+
+
+@app.patch("/api/cameras/{camera_id}/assignment")
+def assign_camera_task(camera_id: str, request: CameraAssignmentRequest):
+    """
+    19082026 - KIET - Gán Detection hoặc Inspection cho camera mà không đổi task API.
+    """
+
+    updated_camera = update_camera_config(
+        camera_id,
+        {"assigned_task": request.assigned_task},
+    )
+    if updated_camera is None:
+        raise HTTPException(status_code=404, detail="Camera config not found")
+
+    inference_engine.register_camera_config(updated_camera)
+    return inference_engine.get_camera_status(camera_id)
+
+
+@app.get("/api/cameras/{camera_id}/status")
+def get_configured_camera_status(camera_id: str):
+    """
+    19082026 - KIET - Trả trạng thái online và lỗi gần nhất của một camera.
+    """
+
+    try:
+        return inference_engine.get_camera_status(camera_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post("/inspect")
-async def trigger_inspect(cam: str = "default"):
-    return inference_engine.run_inspect(cam)
+def trigger_inspect(cam: str = "default"):
+    """
+    19082026 - KIET - Chạy Inspection trong threadpool và khóa riêng theo task.
+    """
+
+    with inference_engine.inspection_lock:
+        return inference_engine.run_inspect(cam)
 
 
 @app.post("/detect")
@@ -1101,7 +1512,7 @@ def get_analytics():
 import requests
 from fastapi import Response
 
-CLOUD_API_BASE = "http://127.0.0.1:8031" # Default defect classification server port for testing
+CLOUD_API_BASE = "http://localhost:8031" # Default defect classification server port for testing
 
 @app.post("/api/sync/dataset-up")
 async def sync_dataset_up():

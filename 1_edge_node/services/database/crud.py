@@ -3,7 +3,7 @@ import json
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from datetime import datetime
-from .models import InspectionRecord, BoltObject, AnomalyDetail
+from .models import InspectionRecord, BoltObject, AnomalyDetail, CameraConfig
 from .session import SessionLocal
 
 def create_inspection_record(record_data: Dict[str, Any]):
@@ -83,5 +83,125 @@ def create_inspection_record(record_data: Dict[str, Any]):
     except Exception as e:
         db.rollback()
         print(f"[DB ERROR] Failed to save inspection record: {e}")
+    finally:
+        db.close()
+
+
+def camera_config_to_dict(camera: CameraConfig) -> Dict[str, Any]:
+    """
+    19082026 - KIET - Chuyển CameraConfig ORM thành payload dùng cho API camera.
+    """
+
+    return {
+        "camera_id": camera.camera_id,
+        "name": camera.name,
+        "source_type": camera.source_type,
+        "source_url": camera.source_url,
+        "serial_number": camera.serial_number,
+        "assigned_task": camera.assigned_task,
+        "enabled": camera.enabled,
+        "width": camera.width,
+        "height": camera.height,
+        "fps": camera.fps,
+    }
+
+
+def list_camera_configs() -> List[Dict[str, Any]]:
+    """
+    19082026 - KIET - Lấy toàn bộ cấu hình camera đã lưu trên Edge database.
+    """
+
+    db: Session = SessionLocal()
+    try:
+        cameras = db.query(CameraConfig).order_by(CameraConfig.camera_id.asc()).all()
+        return [camera_config_to_dict(camera) for camera in cameras]
+    finally:
+        db.close()
+
+
+def get_camera_config(camera_id: str) -> Dict[str, Any] | None:
+    """
+    19082026 - KIET - Lấy cấu hình của một camera theo camera ID.
+    """
+
+    db: Session = SessionLocal()
+    try:
+        camera = db.get(CameraConfig, camera_id)
+        return camera_config_to_dict(camera) if camera is not None else None
+    finally:
+        db.close()
+
+
+def upsert_camera_config(camera_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    19082026 - KIET - Tạo mới hoặc cập nhật cấu hình RTSP/Basler từ Live Stream UI.
+    """
+
+    db: Session = SessionLocal()
+    try:
+        camera_id = str(camera_data["camera_id"])
+        camera = db.get(CameraConfig, camera_id)
+
+        if camera is None:
+            camera = CameraConfig(camera_id=camera_id, name=camera_data["name"], source_type=camera_data["source_type"])
+            db.add(camera)
+
+        editable_fields = (
+            "name",
+            "source_type",
+            "source_url",
+            "serial_number",
+            "assigned_task",
+            "enabled",
+            "width",
+            "height",
+            "fps",
+        )
+        for field_name in editable_fields:
+            if field_name in camera_data:
+                setattr(camera, field_name, camera_data[field_name])
+
+        db.commit()
+        db.refresh(camera)
+        return camera_config_to_dict(camera)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def update_camera_config(camera_id: str, changes: Dict[str, Any]) -> Dict[str, Any] | None:
+    """
+    19082026 - KIET - Cập nhật assignment, trạng thái hoặc metadata của camera đã lưu.
+    """
+
+    db: Session = SessionLocal()
+    try:
+        camera = db.get(CameraConfig, camera_id)
+        if camera is None:
+            return None
+
+        editable_fields = (
+            "name",
+            "source_type",
+            "source_url",
+            "serial_number",
+            "assigned_task",
+            "enabled",
+            "width",
+            "height",
+            "fps",
+        )
+        for field_name in editable_fields:
+            if field_name in changes:
+                setattr(camera, field_name, changes[field_name])
+
+        db.commit()
+        db.refresh(camera)
+        return camera_config_to_dict(camera)
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()

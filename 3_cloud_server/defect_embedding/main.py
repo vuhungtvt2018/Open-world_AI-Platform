@@ -31,11 +31,21 @@ app.add_middleware(
 )
 
 # --- DB init ---
-ensure_pgvector()
-Base.metadata.create_all(bind=engine)
+
+# 17082026 - KIET - Chỉ tạo bảng model khi test sync bằng SQLite
+if engine.dialect.name == "sqlite":
+    CloudAIModel.__table__.create(
+        bind=engine,
+        checkfirst=True
+    )
+
+# 17082026 - KIET - Giữ cơ chế tạo đầy đủ database khi dùng PostgreSQL
+else:
+    ensure_pgvector()
+    Base.metadata.create_all(bind=engine)
 
 # --- IVFFLAT index tạo như cũ (cosine) ---
-if settings.ENABLE_IVFFLAT_INDEX:
+if settings.ENABLE_IVFFLAT_INDEX and  engine.dialect.name == "postgresql":
     dist = settings.IVFFLAT_DISTANCE.lower()
     metric = {
         "l2": "vector_l2_ops",

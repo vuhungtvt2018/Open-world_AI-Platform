@@ -17,3 +17,5 @@ node_modules
 /0_frontend/package-lock.json
 /1_edge_node/test_ai_core.py
 /1_edge_node/packages/ai/engines/fake.py
+*.db
+*.pt
