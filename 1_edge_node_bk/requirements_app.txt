@@ -1,0 +1,11 @@
+opencv-python
+numpy
+ultralytics
+anomalib
+openvino
+timm
+faiss-cpu
+torch
+torchvision
+tqdm
+sqlalchemy
