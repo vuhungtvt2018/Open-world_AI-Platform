@@ -264,6 +264,13 @@ class WebInference:
                 hm_tile = None
                 if getattr(out, "heatmap_display") is not None:
                     hm_tile = out.heatmap_display.copy()
+                    """
+                    19082026 - KHAI - Hide objects not in the main focus in heatmap tile for visualization
+                    """
+                    hm_h, hm_w = hm_tile.shape[:2]        
+                    mask_resized = cv2.resize((crop_mask > 0).astype(np.uint8), (hm_w, hm_h), interpolation=cv2.INTER_NEAREST)
+                    mask_3ch = mask_resized[:, :, None]
+                    hm_tile = hm_tile * mask_3ch
                     label_small = f"obj{i} {'NG' if is_ng else 'OK'}"
                     color = (0, 0, 255) if is_ng else (0, 200, 0)
                     cv2.putText(hm_tile, label_small, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
@@ -319,10 +326,42 @@ class WebInference:
 
                 # Draw on crop for visualization
                 crop_labeled = crop.copy()
+                """
+                19082026 - KHAI - Add Vignette mask to crop to focus on main object
+                """
+                y_indices, x_indices = np.where(crop_mask > 0)
+
+                # Blur surrounding of main object
+                if len(y_indices) > 0 and len(x_indices) > 0:
+                    tight_y1, tight_y2 = y_indices.min(), y_indices.max() + 1
+                    tight_x1, tight_x2 = x_indices.min(), x_indices.max() + 1
+
+                    h, w = crop.shape[:2]
+                    cx, cy = (tight_x1 + tight_x2) // 2, (tight_y1 + tight_y2) // 2
+                    X, Y = np.meshgrid(np.arange(w), np.arange(h))
+                    max_radius = np.sqrt(w**2 + h**2) / 2.0
+                    dist_from_center = np.sqrt((X - cx)**2 + (Y - cy)**2)
+
+                    # Vignette mask
+                    vignette_mask = np.clip(1.0 - (dist_from_center / max_radius) * 0.90, 0.10, 1.0)
+                    vignette_mask_3ch = np.dstack([vignette_mask] * 3)
+
+                    # Dim background area
+                    vignetted_crop = (crop.astype(np.float32) * vignette_mask_3ch * 0.5).astype(np.uint8)
+
+                    # Segmentation mask blending
+                    binary_mask = (crop_mask > 0).astype(np.float32)
+                    feathered_mask = cv2.GaussianBlur(binary_mask, (15, 15), 0)[:, :, None]
+                    crop_labeled = (crop.astype(np.float32) * feathered_mask + 
+                                    vignetted_crop.astype(np.float32) * (1.0 - feathered_mask)).astype(np.uint8)
+                
                 if is_ng and len(anomalies_full) > 0:
                     for idx_disp, a in enumerate(anomalies_full, start=1):
+                        """
+                        19082026 - KHAI - Fix bbox thickness and label size for crop images
+                        """
                         cx1, cy1, cx2, cy2 = a["bbox_in_object_crop"]
-                        cv2.rectangle(crop_labeled, (cx1, cy1), (cx2, cy2), (0, 0, 255), 2)
+                        cv2.rectangle(crop_labeled, (cx1, cy1), (cx2, cy2), (0, 0, 255), 3)
                         
                         label_text = f"NG{idx_disp}"
                         sim_val = a.get("cls_similarity", None)
@@ -335,11 +374,11 @@ class WebInference:
                             else:
                                 label_text = a['cls_label']
                                 
-                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 1.25, 2)
                         tx1, ty1 = cx1, max(0, cy1 - th - 6)
                         tx2, ty2 = cx1 + tw + 8, cy1
                         cv2.rectangle(crop_labeled, (tx1, ty1), (tx2, ty2), (0, 0, 255), -1)
-                        cv2.putText(crop_labeled, label_text, (cx1 + 3, cy1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                        cv2.putText(crop_labeled, label_text, (cx1 + 3, cy1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 1.25,
                                     (255, 255, 255), 2, cv2.LINE_AA)
 
                 per_objects.append({
