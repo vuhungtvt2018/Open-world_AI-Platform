@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, Response
 from services.database.session import SessionLocal
-from services.database.models import InspectionRecord, BoltObject, AnomalyDetail
+from services.database.models import InspectionRecord, InspectionObject, AnomalyDetail
 from packages.core.config import AppConfig
 
 FILE = Path(__file__).resolve()

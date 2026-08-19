@@ -512,7 +512,7 @@ async def get_analytics(date: str = None):
     date: YYYY-MM-DD string in local time (UTC+7). Defaults to today.
     """
     from datetime import datetime, timedelta
-    from services.database.models import BoltObject, AnomalyDetail
+    from services.database.models import InspectionObject, AnomalyDetail
     db = SessionLocal()
     try:
         db.commit()

@@ -5,8 +5,9 @@ import sys
 import numpy as np
 from pathlib import Path
 from packages.workflow.pipeline import Pipeline
-from packages.utils.utils import (ts, union_box, pad_and_clip_box,
-                     arrow_angle, rotate_image, transform_points, need_clean, clean_data)
+from packages.utils.utils import (ts, union_box, pad_and_clip_box, 
+                     arrow_angle, rotate_image, transform_points, need_clean, clean_data,
+                     transform_bbox_to_original_coords)
 from packages.utils.visualize import concat_anomaly_crops
 from packages.workflow.events import default_event_bus, EventBus
 from packages.core.config import AppConfig
@@ -118,12 +119,12 @@ class WebInference:
                 center_y = (y_min + y_max) // 2
                 max_val = max(abs(x_max - x_min), abs(y_max - y_min))
 
-                cx1 = center_x - max_val // 2
-                cy1 = center_y - max_val // 2
-                cx2 = center_x + max_val // 2
-                cy2 = center_y + max_val // 2
-                crop = rotated_frame[max(0, cy1):cy2, max(0, cx1):cx2]
-                crop_mask = rotated_mask[max(0, cy1):cy2, max(0, cx1):cx2]
+                crop_x1 = max(0, center_x - max_val // 2)
+                crop_y1 = max(0, center_y - max_val // 2)
+                crop_x2 = center_x + max_val // 2
+                crop_y2 = center_y + max_val // 2
+                crop = rotated_frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                crop_mask = rotated_mask[crop_y1:crop_y2, crop_x1:crop_x2]
 
                 if crop.size == 0 or crop_mask.size == 0:
                     continue
@@ -132,35 +133,71 @@ class WebInference:
                 crop_path = os.path.join(self.pipeline.dir_crops, crop_name)
                 cv2.imwrite(crop_path, crop)
 
-                out = self.pipeline.anomaly.run_on_crop(crop, crop_mask)
-                is_ng = bool(out.get("is_ng", False))
+                """
+                09082026 - KHAI - Add codes to save mask
+                """
+                # Lưu mask
+                mask_name = f"MASK_{name}_{i}.jpg"
+                mask_path = os.path.join(self.pipeline.dir_masks, mask_name)
+                cv2.imwrite(mask_path, crop_mask)
 
+                # Anomaly Detection
+                out = self.pipeline.anomaly.run(crop, crop_mask)
+                is_ng = bool(getattr(out, "is_ng", False))
+                
+                # Visualization tiles
                 hm_tile = None
-                if out.get("hm_disp") is not None:
-                    hm_tile = out["hm_disp"].copy()
+                if getattr(out, "heatmap_display") is not None:
+                    hm_tile = out.heatmap_display.copy()
+                    """
+                    19082026 - KHAI - Hide objects not in the main focus in heatmap tile for visualization
+                    """
+                    hm_h, hm_w = hm_tile.shape[:2]        
+                    mask_resized = cv2.resize((crop_mask > 0).astype(np.uint8), (hm_w, hm_h), interpolation=cv2.INTER_NEAREST)
+                    mask_3ch = mask_resized[:, :, None]
+                    hm_tile = hm_tile * mask_3ch
                     label_small = f"obj{i} {'NG' if is_ng else 'OK'}"
                     color = (0, 0, 255) if is_ng else (0, 200, 0)
                     cv2.putText(hm_tile, label_small, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
                 anomalies_full = []
                 cls_labels_i = []
-
+                
                 if is_ng:
                     ng_any = True
-                    cv2.imwrite(os.path.join(self.pipeline.dir_ng, f"NG_HEAT_{name}_{i}.jpg"), out["hm_disp"])
-                    for ak, a in enumerate(out.get("anomalies", [])):
-                        bx1, by1, bx2, by2 = a["bbox_in_object_crop"]
+                    # Lưu heatmap cho NG
+                    cv2.imwrite(os.path.join(self.pipeline.dir_ng, f"NG_HEAT_{name}_{i}.jpg"), out.heatmap_display)
+
+                    for ak, a in enumerate(getattr(out, "boxes", [])):
+                        """
+                        08082026 - KHAI - Refactor code to adhere to modified Pipeline
+                        """
+                        cx1, cy1, cx2, cy2 = int(a.xmin), int(a.ymin), int(a.xmax), int(a.ymax)
+                        """
+                        16082026 - KHAI - Convert bbox in crop to bbox in original
+                        """
+                        bbox_in_crop = [int(cx1), int(cy1), int(cx2), int(cy2)]
+                        crop_origin = (crop_x1, crop_y1)
+                        bbox_in_original = transform_bbox_to_original_coords(
+                            bbox_in_crop,
+                            M,
+                            crop_origin,
+                            frame.shape,
+                        )
                         anomalies_full.append({
                             "k": ak,
-                            "bbox_full": [int(bx1), int(by1), int(bx2), int(by2)],
-                            "bbox_in_object_crop": [int(bx1), int(by1), int(bx2), int(by2)],
+                            "bbox_full": bbox_in_original,
+                            "bbox_in_object_crop": bbox_in_crop,
+                            "bbox_in_original": bbox_in_original,
                         })
-                        anom_crop = crop[by1:by2, bx1:bx2]
+                        anom_crop = crop[cy1:cy2, cx1:cx2]
                         if anom_crop.size != 0:
                             anom_name = f"ANOM_{name}_obj{i}_{ak}.jpg"
                             anom_path = os.path.join(self.pipeline.dir_anom_crops, anom_name)
                             cv2.imwrite(anom_path, anom_crop)
-                            cls_res = self.pipeline._classify_defect(anom_path)
+                            
+                            # Gọi API phân loại của pipeline
+                            cls_res = self.pipeline.classify_defect(anom_path)
                             if cls_res is not None:
                                 label = cls_res.get("label", "NG")
                                 sim = float(cls_res.get("similarity", 0.0))
@@ -173,10 +210,43 @@ class WebInference:
 
                 # Draw on crop for visualization
                 crop_labeled = crop.copy()
+                """
+                19082026 - KHAI - Add Vignette mask to crop to focus on main object
+                """
+                y_indices, x_indices = np.where(crop_mask > 0)
+
+                # Blur surrounding of main object
+                if len(y_indices) > 0 and len(x_indices) > 0:
+                    tight_y1, tight_y2 = y_indices.min(), y_indices.max() + 1
+                    tight_x1, tight_x2 = x_indices.min(), x_indices.max() + 1
+
+                    h, w = crop.shape[:2]
+                    cx, cy = (tight_x1 + tight_x2) // 2, (tight_y1 + tight_y2) // 2
+                    X, Y = np.meshgrid(np.arange(w), np.arange(h))
+                    max_radius = np.sqrt(w**2 + h**2) / 2.0
+                    dist_from_center = np.sqrt((X - cx)**2 + (Y - cy)**2)
+
+                    # Vignette mask
+                    vignette_mask = np.clip(1.0 - (dist_from_center / max_radius) * 0.90, 0.10, 1.0)
+                    vignette_mask_3ch = np.dstack([vignette_mask] * 3)
+
+                    # Dim background area
+                    vignetted_crop = (crop.astype(np.float32) * vignette_mask_3ch * 0.5).astype(np.uint8)
+
+                    # Segmentation mask blending
+                    binary_mask = (crop_mask > 0).astype(np.float32)
+                    feathered_mask = cv2.GaussianBlur(binary_mask, (15, 15), 0)[:, :, None]
+                    crop_labeled = (crop.astype(np.float32) * feathered_mask + 
+                                    vignetted_crop.astype(np.float32) * (1.0 - feathered_mask)).astype(np.uint8)
+                
                 if is_ng and len(anomalies_full) > 0:
                     for idx_disp, a in enumerate(anomalies_full, start=1):
-                        bx1, by1, bx2, by2 = a["bbox_in_object_crop"]
-                        cv2.rectangle(crop_labeled, (bx1, by1), (bx2, by2), (0, 0, 255), 2)
+                        """
+                        19082026 - KHAI - Fix bbox thickness and label size for crop images
+                        """
+                        cx1, cy1, cx2, cy2 = a["bbox_in_object_crop"]
+                        cv2.rectangle(crop_labeled, (cx1, cy1), (cx2, cy2), (0, 0, 255), 3)
+                        
                         label_text = f"NG{idx_disp}"
                         sim_val = a.get("cls_similarity", None)
                         if self.cfg.DEFECT_CLS_ENABLE and a.get("cls_label") and a["cls_label"] != "NG":
@@ -187,19 +257,21 @@ class WebInference:
                                     label_text = f"{a['cls_label']}? ({float(sim_val):.2f})"
                             else:
                                 label_text = a['cls_label']
-                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                        tx1, ty1 = bx1, max(0, by1 - th - 6)
-                        tx2, ty2 = bx1 + tw + 8, by1
+                                
+                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 1.25, 2)
+                        tx1, ty1 = cx1, max(0, cy1 - th - 6)
+                        tx2, ty2 = cx1 + tw + 8, cy1
                         cv2.rectangle(crop_labeled, (tx1, ty1), (tx2, ty2), (0, 0, 255), -1)
-                        cv2.putText(crop_labeled, label_text, (bx1 + 3, by1 - 6),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+                        cv2.putText(crop_labeled, label_text, (cx1 + 3, cy1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 1.25,
+                                    (255, 255, 255), 2, cv2.LINE_AA)
 
                 per_objects.append({
+                    "product_id": 1,
                     "index": i,
                     "bbox": [0, 0, crop.shape[1], crop.shape[0]],
-                    "score": round(float(out.get("score", 0.0)), 4),
+                    "score": round(float(getattr(out, "classification_score", 0.0)), 4),
                     "is_ng": is_ng,
-                    "overlap_ratio": round(float(out.get("overlap_ratio", 0.0)), 4) if crop.size != 0 else 0.0,
+                    "overlap_ratio": round(float(getattr(out, "overlap_ratio", 0.0)), 4) if crop.size != 0 else 0.0,
                     "crop": crop_name,
                     "crop_url": f"/captures/{self.cfg.PRODUCT_NAME}/sessions/{os.path.basename(self.pipeline.session_root)}/crops/{crop_name}",
                     "hm_tile": hm_tile,
@@ -207,18 +279,72 @@ class WebInference:
                     "anomalies": anomalies_full
                 })
 
-        # Visualization panels
+        # 1. Heatmap panel
         hm_tiles = [obj["hm_tile"] for obj in per_objects if obj["hm_tile"] is not None]
         hm_panel = concat_anomaly_crops(hm_tiles, target_h=400) if hm_tiles else np.zeros((400, 400, 3), dtype=np.uint8)
         hm_name = f"HM_{name}.jpg"
         cv2.imwrite(os.path.join(self.pipeline.session_root, hm_name), hm_panel)
-
+        
+        # 2. Labeled crops panel
         labeled_crops = [obj["crop_labeled"] for obj in per_objects]
         crops_panel = concat_anomaly_crops(labeled_crops, target_h=400) if labeled_crops else np.zeros((400, 400, 3), dtype=np.uint8)
         crops_name = f"CROPS_VIS_{name}.jpg"
         cv2.imwrite(os.path.join(self.pipeline.session_root, crops_name), crops_panel)
 
+        # 3. Overall output
         overall_vis = frame.copy()
+        for i, obj in enumerate(per_objects):
+            """
+            10082026 - KHANH - Visualize OK and NG objects in overall output
+            """
+            object_index = obj["index"]
+
+            if object_index >= len(mapping_object):
+                continue
+
+            """
+            16082026 - KHAI - Convert bbox in crop to bbox in original
+            """
+            is_ng = obj["is_ng"]
+            if is_ng and obj.get("anomalies"):
+                for ak, anomaly in enumerate(obj["anomalies"], start=1):
+                    x1, y1, x2, y2 = anomaly.get("bbox_in_original", [0, 0, 0, 0])
+                    cv2.rectangle(
+                        overall_vis,
+                        (x1, y1),
+                        (x2, y2),
+                        (0, 0, 255),
+                        3,
+                    )
+
+                    label = anomaly.get("cls_label") or f"NG{ak}"
+                    if anomaly.get("cls_similarity") is not None:
+                        label = f"{label} ({float(anomaly['cls_similarity']):.2f})"
+                    (text_width, text_height), baseline = cv2.getTextSize(
+                        label,
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        2,
+                    )
+                    label_top = max(0, y1 - text_height - baseline - 8)
+                    cv2.rectangle(
+                        overall_vis,
+                        (x1, label_top),
+                        (x1 + text_width + 10, y1),
+                        (0, 0, 255),
+                        -1,
+                    )
+                    cv2.putText(
+                        overall_vis,
+                        label,
+                        (x1 + 5, y1 - baseline - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        (255, 255, 255),
+                        2,
+                        cv2.LINE_AA,
+                    )
+        
         overall_name = f"OVERALL_{name}.jpg"
         cv2.imwrite(os.path.join(self.pipeline.session_root, overall_name), overall_vis)
 
