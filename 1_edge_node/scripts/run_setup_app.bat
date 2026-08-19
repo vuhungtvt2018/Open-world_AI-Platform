@@ -1,21 +1,31 @@
 @echo off
+
 echo =========================================
-echo [1] Check and setup uv environment
+echo [1] Check and create .env if not exists
 echo =========================================
-cd ..
-if not exist .venv (
-    echo Creating uv virtual environment...
-    uv venv
+if not exist .env (
+    echo Creating app virtual environment...
+    python -m venv .env
 ) else (
-    echo Virtual environment already exists
+    echo Virtual environment ".env" already exists
 )
 
 echo.
 echo =========================================
-echo [2] Sync Workspace Dependencies
+echo [2] Activate .env environment
 echo =========================================
-echo Syncing workspace...
-uv sync
+call .env\Scripts\activate.bat
+
+echo.
+echo =========================================
+echo [3] Install dependencies from requirements_app.txt
+echo =========================================
+if exist requirements_app.txt (
+    echo Installing requirements...
+    pip install -r requirements_app.txt
+) else (
+    echo [WARNING] requirements_app.txt not found, skipping install
+)
 
 echo.
 echo =========================================

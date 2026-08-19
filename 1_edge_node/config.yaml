@@ -1,10 +1,10 @@
-PROJECT_PATH: D:\ivs\my_folder\freelance\visual_inspection\sprint_20250908_20250912_direction\demo_bulong\1_edge_node
+PROJECT_PATH: demo_bulong\1_edge_node
 EDGE_IP: 10.32.11.97
 PORT: 8000
 EDGE_CODE: edge_bulong_1
 RTSP_URL: 0
-CAM_WIDTH: 1280
-CAM_HEIGHT: 720
+CAM_WIDTH: 1920
+CAM_HEIGHT: 1080
 CAPTURE_DIR: captures
 PRODUCT_NAME: sp1
 FLIP_VERTICAL: false

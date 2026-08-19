@@ -15,7 +15,7 @@ from typing import List, Dict, Optional
 from datetime import datetime
 
 from packages.core.config import AppConfig
-from services.session import make_session_dir
+from packages.utils.session import make_session_dir
 from packages.utils.utils import (ensure_dirs, compute_iou)
 from packages.ai.tasks.detection import YOLODetector
 from packages.ai.tasks.anomaly import AnomalyInferencer, AnomalyConfig
