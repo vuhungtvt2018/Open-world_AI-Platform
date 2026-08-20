@@ -12,7 +12,7 @@ from packages.ai.tasks.yolo_detector import YOLODetector
 from packages.core.config import AppConfig
 from packages.camera.camera import RTSP_Threaded_Camera
 from packages.utils.utils import ensure_dirs, ts, pad_and_clip_box
-from services.session import make_session_dir
+from packages.utils.session import make_session_dir
 
 def resolve_collect_root(cfg: AppConfig, out_dir_cli: str | None) -> str:
     if out_dir_cli:

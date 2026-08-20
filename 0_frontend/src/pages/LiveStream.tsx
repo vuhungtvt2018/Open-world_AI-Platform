@@ -9,7 +9,8 @@ import {
   ChevronRight, 
   Activity,
   Zap,
-  Monitor
+  Monitor,
+  Power
 } from 'lucide-react';
 import './LiveStream.css';
 
@@ -26,6 +27,7 @@ export default function LiveStream() {
   const [cameras, setCameras] = useState(initialCameras);
   const [selectedCamId, setSelectedCamId] = useState(1);
   const [isRecording, setIsRecording] = useState(false);
+  const [camStats, setCamStats] = useState<any>({});
 
   const selectedCam = cameras.find(c => c.id === selectedCamId) || cameras[0];
 
@@ -44,6 +46,21 @@ export default function LiveStream() {
       }
     };
     initCameras();
+    
+    // Poll for real camera stats
+    const fetchStats = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/camera-stats`);
+        const data = await response.json();
+        setCamStats(data.stats || {});
+      } catch (err) {
+        // Silently fail if backend is restarting
+      }
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 2000);
+    
+    return () => clearInterval(interval);
   }, []); // Run once on mount
 
   const updateStreamType = async (type: string) => {
@@ -58,6 +75,26 @@ export default function LiveStream() {
       await fetch(`${API_BASE_URL}/set-mode/${mode}?cam=${selectedCamId}`, { method: 'POST' });
     } catch (err) {
       console.error(`Failed to switch mode for CAM ${selectedCamId}`, err);
+    }
+  };
+
+  const toggleCameraPower = async () => {
+    const isTurningOn = selectedCam.status === 'offline';
+    const newStatus = isTurningOn ? 'online' : 'offline';
+    
+    setCameras(cams => cams.map(c => 
+      c.id === selectedCam.id ? { ...c, status: newStatus } : c
+    ));
+    
+    try {
+      if (isTurningOn) {
+        const mode = selectedCam.streamType === 'Basler' ? 'basler' : 'stream';
+        await fetch(`${API_BASE_URL}/set-mode/${mode}?cam=${selectedCam.id}`, { method: 'POST' });
+      } else {
+        await fetch(`${API_BASE_URL}/set-mode/none?cam=${selectedCam.id}`, { method: 'POST' });
+      }
+    } catch (err) {
+      console.error(`Failed to toggle power for CAM ${selectedCam.id}`, err);
     }
   };
 
@@ -90,16 +127,23 @@ export default function LiveStream() {
                     <span className="cam-name">{selectedCam.name}</span>
                   </div>
                   
-                  <img 
-                    key={`main-${selectedCam.id}-${selectedCam.streamType}`}
-                    src={`${API_BASE_URL}/video-feed?cam=${selectedCam.id}&mode=${selectedCam.streamType}`} 
-                    alt="Live Stream" 
-                    className="result-image" 
-                    style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFjaXR5PSIwLjUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5ObyBTdHJlYW0gQ29ubmVjdGlvbjwvdGV4dD48L3N2Zz4=';
-                    }}
-                  />
+                  {selectedCam.status === 'online' ? (
+                    <img 
+                      key={`main-${selectedCam.id}-${selectedCam.streamType}`}
+                      src={`${API_BASE_URL}/video-feed?cam=${selectedCam.id}&mode=${selectedCam.streamType}`} 
+                      alt="Live Stream" 
+                      className="result-image" 
+                      style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMwMDAiLz48dGV4dCB4PSI1MCUiIHk9IjUwJSIgZmlsbD0iI2ZmZiIgZmlsbC1vcGFjaXR5PSIwLjUiIGZvbnQtZmFtaWx5PSJzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5ObyBTdHJlYW0gQ29ubmVjdGlvbjwvdGV4dD48L3N2Zz4=';
+                      }}
+                    />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#000', color: '#666' }}>
+                      <VideoOff size={48} style={{ marginBottom: '16px' }} />
+                      <span style={{ fontSize: '18px' }}>Camera is Offline</span>
+                    </div>
+                  )}
                 </div>
               
               <div className="stream-controls">
@@ -123,6 +167,14 @@ export default function LiveStream() {
                       style={{ padding: '4px 8px', fontSize: '11px', minWidth: '80px', border: 'none', background: selectedCam.streamType === 'Basler' ? 'var(--primary)' : 'transparent', color: 'white', borderRadius: '4px', cursor: 'pointer' }}
                     >Basler</button>
                   </div>
+                  <button 
+                    className="icon-btn" 
+                    title={selectedCam.status === 'online' ? "Turn Off" : "Turn On"}
+                    onClick={toggleCameraPower}
+                    style={{ color: selectedCam.status === 'online' ? '#10b981' : '#ef4444' }}
+                  >
+                    <Power size={18} />
+                  </button>
                   <button className="icon-btn" title="Settings"><Settings size={18} /></button>
                   <button className="icon-btn" title="Fullscreen"><Maximize2 size={18} /></button>
                 </div>
@@ -132,19 +184,19 @@ export default function LiveStream() {
             <div className="stream-metadata">
               <div className="meta-item">
                 <span className="label">Resolution</span>
-                <span className="value">{selectedCam.resolution}</span>
+                <span className="value">{camStats[selectedCam.id]?.resolution || selectedCam.resolution}</span>
               </div>
               <div className="meta-item">
                 <span className="label">Bitrate</span>
-                <span className="value">{selectedCam.bitrate}</span>
+                <span className="value">{camStats[selectedCam.id]?.bitrate || selectedCam.bitrate}</span>
               </div>
               <div className="meta-item">
                 <span className="label">Latency</span>
-                <span className="value">42ms</span>
+                <span className="value">{camStats[selectedCam.id]?.latency || '42ms'}</span>
               </div>
               <div className="meta-item">
                 <span className="label">Codec</span>
-                <span className="value">H.264 / NVENC</span>
+                <span className="value">{camStats[selectedCam.id]?.codec || 'H.264 / NVENC'}</span>
               </div>
             </div>
           </div>
@@ -157,22 +209,28 @@ export default function LiveStream() {
                 onClick={() => setSelectedCamId(cam.id)}
               >
                 <div className="grid-preview" style={{ padding: 0, position: 'relative', overflow: 'hidden' }}>
-                  <img 
-                    src={`${API_BASE_URL}/video-feed?cam=${cam.id}&mode=${cam.streamType}`}
-                    alt={cam.name}
-                    style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMzMzMiLz48L3N2Zz4=';
-                    }}
-                  />
-                  <div className="grid-status-badge" style={{ position: 'absolute', bottom: '8px', left: '8px', zIndex: 10 }}>
-                    <div className="status-dot online"></div>
-                    <span>CAM 0{cam.id}</span>
+                  {cam.status === 'online' ? (
+                    <img 
+                      src={`${API_BASE_URL}/video-feed?cam=${cam.id}&mode=${cam.streamType}`}
+                      alt={cam.name}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', background: '#000' }}
+                      onError={(e) => {
+                        (e.target as HTMLImageElement).src = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9IiMzMzMiLz48L3N2Zz4=';
+                      }}
+                    />
+                  ) : (
+                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000', color: '#666', fontSize: '12px' }}>
+                      <VideoOff size={24} style={{ marginBottom: '8px' }} />
+                    </div>
+                  )}
+                  <div className="grid-status-badge">
+                    <div className={`status-dot ${cam.status}`}></div>
+                    <span>{cam.streamType}</span>
                   </div>
                 </div>
                 <div className="grid-info">
                   <span className="name">{cam.name}</span>
-                  <span className="meta">{cam.resolution} • {cam.fps} FPS • {cam.streamType}</span>
+                  <span className="meta">{camStats[cam.id]?.resolution || cam.resolution} • {camStats[cam.id]?.fps || cam.fps} FPS • {cam.streamType}</span>
                 </div>
               </div>
             ))}

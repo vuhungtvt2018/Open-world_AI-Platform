@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   TrendingUp, 
   BarChart3, 
@@ -59,45 +59,86 @@ const hourlyOutputData = [
 const EDGE_API_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000';
 
 export default function Analytics() {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const [selectedDate, setSelectedDate] = React.useState(todayStr);
+  const dateInputRef = useRef<HTMLInputElement>(null);
   const [stats, setStats] = React.useState({
-    totalInspected: 3542,
-    overallYield: 97.2,
-    totalNg: 82,
-    avgCycleTime: 2.45,
+    totalInspected: 0,
+    overallYield: 100.0,
+    totalNg: 0,
+    avgCycleTime: 1.2,
     pareto: defectParetoData
   });
+  const [yieldTrend, setYieldTrend] = React.useState(yieldTrendData);
+  const [hourlyOutput, setHourlyOutput] = React.useState(hourlyOutputData);
 
   React.useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const res = await fetch(`${EDGE_API_URL}/api/analytics`);
-        if (res.ok) {
-          const data = await res.json();
-          setStats(data);
-        }
+        const res = await fetch(`${EDGE_API_URL}/analytics?date=${selectedDate}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        setStats({
+          totalInspected: data.totalInspected,
+          overallYield: data.overallYield,
+          totalNg: data.totalNg,
+          avgCycleTime: data.avgCycleTime,
+          pareto: data.pareto
+        });
+        
+        setYieldTrend(data.yieldTrendData);
+        setHourlyOutput(data.hourlyOutputData);
       } catch (err) {
-        console.error("Failed to fetch analytics from Cloud API");
+        console.error("Failed to fetch analytics", err);
       }
     };
-    
+
     fetchAnalytics();
-    // Refresh every 5 minutes (300,000 ms)
-    const interval = setInterval(fetchAnalytics, 30000);
+    const interval = setInterval(fetchAnalytics, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [selectedDate]);
 
   const handleExport = () => {
-    const dataStr = JSON.stringify(stats, null, 2);
-    const blob = new Blob([dataStr], { type: "application/json" });
+    const lines: string[] = [];
+
+    // === SECTION 1: SUMMARY ===
+    lines.push(`Vision Analytics Report`);
+    lines.push(`Date,${selectedDate}`);
+    lines.push(`Total Inspected,${stats.totalInspected}`);
+    lines.push(`Overall Yield (%),${stats.overallYield}`);
+    lines.push(`Total NG,${stats.totalNg}`);
+    lines.push(`Avg Cycle Time (s),${stats.avgCycleTime}`);
+    lines.push(``);
+
+    // === SECTION 2: HOURLY PRODUCTION OUTPUT ===
+    lines.push(`Hourly Production Output`);
+    lines.push(`Hour,OK,NG,Total,Yield (%)`);
+    for (const row of hourlyOutput) {
+      const total = row.ok + row.ng;
+      const rate = total > 0 ? ((row.ok / total) * 100).toFixed(1) : '0.0';
+      lines.push(`${row.hour},${row.ok},${row.ng},${total},${rate}`);
+    }
+    lines.push(``);
+
+    // === SECTION 3: DEFECT PARETO ===
+    lines.push(`Defect Pareto Analysis`);
+    lines.push(`Defect Type,Count`);
+    for (const item of stats.pareto) {
+      lines.push(`${item.name},${item.count}`);
+    }
+
+    const csvContent = lines.join('\n');
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
+    const a = document.createElement('a');
     a.href = url;
-    a.download = `vision_analytics_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `vision_analytics_${selectedDate}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const currentDateText = `Today, ${new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date())}`;
+
 
   return (
     <div className="analytics-container">
@@ -107,9 +148,26 @@ export default function Analytics() {
           <p className="text-muted">Deep analysis of production quality and defect patterns</p>
         </div>
         <div className="header-actions">
-          <div className="date-picker">
+          <div
+            className="date-picker"
+            style={{ position: 'relative', cursor: 'pointer' }}
+            onClick={() => dateInputRef.current?.showPicker()}
+          >
             <Calendar size={18} />
-            <span>{currentDateText}</span>
+            <input
+              ref={dateInputRef}
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              style={{
+                position: 'absolute', opacity: 0, pointerEvents: 'none',
+                width: 0, height: 0, top: 0, left: 0
+              }}
+            />
+            <span>
+              {new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                .format(new Date(selectedDate + 'T00:00:00'))}
+            </span>
           </div>
           <button className="export-btn" onClick={handleExport}>
             <Download size={18} />
@@ -158,7 +216,7 @@ export default function Analytics() {
           </div>
           <div className="chart-wrapper">
             <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={stats.yieldTrendData || yieldTrendData}>
+              <AreaChart data={yieldTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
@@ -208,7 +266,7 @@ export default function Analytics() {
           </div>
           <div className="chart-wrapper">
             <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={stats.hourlyOutputData || hourlyOutputData}>
+              <BarChart data={hourlyOutput}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="hour" axisLine={false} tickLine={false} fontSize={12} />
                 <YAxis axisLine={false} tickLine={false} fontSize={12} />

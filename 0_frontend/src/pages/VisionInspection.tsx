@@ -139,7 +139,7 @@ export default function VisionInspection() {
               </div>
               <div className="image-display">
                 {inputMode === 'stream' || inputMode === 'basler' ? (
-                  <img src={`${API_BASE_URL}/video-feed`} alt="Live stream" className="result-image" />
+                  <img src={`${API_BASE_URL}/video-feed?cam=${inputMode === 'basler' ? '1' : 'default'}&mode=${inputMode}`} alt="Live stream" className="result-image" />
                 ) : selectedImage ? (
                   <img src={`${API_BASE_URL}/images/${selectedImage}`} alt="Selected input" className="result-image" />
                 ) : (

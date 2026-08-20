@@ -65,11 +65,8 @@ export default function Sidebar({ activeTab, onTabChange, userRole, onRoleChange
       <div className="sidebar-header">
         {!isCollapsed && (
           <div className="logo-section">
-            <div className="logo-icon glow-primary">
-              <img src="/logo.png" alt="VISION AI logo" className="logo-image" />
-            </div>
             <div className="logo-text">
-              <h2 className="text-primary">VISION AI</h2>
+              <h2 className="text-primary">VISUAL INSPECTION</h2>
             </div>
           </div>
         )}

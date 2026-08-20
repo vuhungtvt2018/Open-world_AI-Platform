@@ -114,4 +114,4 @@ class QCProductPhotoLibrary(Base):
     Insert_PIC: Mapped[str | None] = mapped_column(String(50))
     Insert_Date: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), server_default=func.now())
     Update_PIC: Mapped[str | None] = mapped_column(String(50))
-    Update_Date: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), server_default=func.now(), server_onupdate=sqltext("NOW()"))
+    Update_Date: Mapped[str | None] = mapped_column(DateTime(timezone=False), server_default=func.now(), server_onupdate=sqltext("NOW()"))

@@ -1,7 +1,7 @@
 # ==========================================
 # MAIN SERVER CONFIG (DEFECT EMBEDDING)
 # ==========================================
-PROJECT_PATH: "D:\\ivs\\my_folder\\freelance\\visual_inspection\\sprint_20250908_20250912_direction\\demo_bulong\\3_cloud_server\\defect_embedding"
+PROJECT_PATH: "\\demo_bulong\\3_cloud_server\\defect_embedding"
 
 # FAST API CONFIG
 IP: "10.32.11.97"
