@@ -14,6 +14,37 @@
   align-items: flex-start;
 }
 
+.mode-selector {
+  display: flex;
+  gap: 8px;
+  background-color: var(--surface);
+  padding: 4px;
+  border-radius: 8px;
+  width: fit-content;
+  border: 1px solid var(--border);
+}
+
+.mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-btn.active {
+  background-color: var(--primary);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+
 .status-badge {
   display: flex;
   align-items: center;
@@ -153,6 +184,7 @@
 .bg-warning { background-color: var(--warning); }
 .bg-success { background-color: var(--success); }
 .bg-secondary { background-color: var(--secondary); }
+.bg-primary { background-color: var(--primary); }
 
 .event-details {
   display: flex;

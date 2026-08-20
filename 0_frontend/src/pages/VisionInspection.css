@@ -50,7 +50,7 @@
 .mode-btn.active {
   background-color: var(--surface);
   color: var(--primary);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .mode-btn:disabled {
@@ -111,16 +111,17 @@
   border-radius: 12px;
   overflow: hidden;
   background-color: #000;
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  min-height: 0;
 }
 
 .view-header {
   padding: 10px 16px;
-  background-color: rgba(0,0,0,0.85);
+  background-color: rgba(0, 0, 0, 0.85);
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   color: white !important;
 }
 
@@ -139,9 +140,20 @@
   font-weight: 700;
 }
 
-.result-tag.ng { background-color: var(--secondary); color: #fff; }
-.result-tag.ok { background-color: var(--success); color: #fff; }
-.result-tag.detected { background-color: var(--primary); color: #fff; }
+.result-tag.ng {
+  background-color: var(--secondary);
+  color: #fff;
+}
+
+.result-tag.ok {
+  background-color: var(--success);
+  color: #fff;
+}
+
+.result-tag.detected {
+  background-color: var(--primary);
+  color: #fff;
+}
 
 .image-display {
   flex: 1;
@@ -150,6 +162,7 @@
   justify-content: center;
   background-color: #1a1a1a;
   position: relative;
+  min-height: 0;
 }
 
 .result-image {
@@ -252,7 +265,7 @@
   overflow: hidden;
   background-color: #000;
   flex-shrink: 0;
-  border: 1px solid rgba(255,255,255,0.1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .item-thumbnail {
@@ -343,6 +356,120 @@
   margin: 12px 0;
 }
 
+.quad-viewer.detection-mode {
+  grid-template-rows: 1fr auto;
+}
+
+.counting-summary-panel {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  height: fit-content;
+}
+
+.counting-summary-body {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 18px;
+  background-color: var(--surface);
+}
+
+.total-objects-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 160px;
+}
+
+.total-objects-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.total-objects-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.total-objects-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.total-objects-val {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--primary);
+  line-height: 1.1;
+}
+
+.counting-divider {
+  width: 1px;
+  height: 50px;
+  background-color: var(--border);
+  flex-shrink: 0;
+}
+
+.class-counts-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.class-counts-header {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.class-counts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.class-count-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.class-count-card .class-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.class-count-card .class-val {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
 .detection-data-panel {
   background-color: var(--surface);
 }
@@ -400,4 +527,186 @@
     grid-template-columns: 1fr;
   }
 
+  .counting-summary-body {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .counting-divider {
+    width: 100%;
+    height: 1px;
+  }
+}
+
+/* 12082026 - KIET - Style cho nút View và Modal xem ảnh phóng to */
+.view-expand-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.view-expand-btn:hover {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.image-display.cursor-pointer {
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.image-display.cursor-pointer:hover {
+  opacity: 0.95;
+}
+
+.image-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.image-modal-content {
+  width: 92vw;
+  height: 88vh;
+  max-width: 1400px;
+  background: #0d1117;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+}
+
+.image-modal-header {
+  padding: 12px 20px;
+  background: rgba(22, 27, 34, 0.95);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.image-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.image-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modal-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: var(--primary);
+}
+
+.zoom-value {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: monospace;
+  min-width: 42px;
+  text-align: center;
+}
+
+.modal-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #ef4444;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-left: 8px;
+}
+
+.modal-close-btn:hover {
+  background: #ef4444;
+  color: #fff;
+}
+
+.image-modal-body {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: #05070a;
+  position: relative;
+}
+
+.image-modal-viewport {
+  max-width: 100%;
+  max-height: 100%;
+  transition: transform 0.2s ease-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-full-image {
+  max-width: 100%;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
