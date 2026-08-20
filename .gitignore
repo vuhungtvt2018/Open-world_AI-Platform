@@ -7,3 +7,7 @@ __pycache__/
 .env/
 captures/
 node_modules
+
+# Checkpoint files
+*.onnx
+*.pt
