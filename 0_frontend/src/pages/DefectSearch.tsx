@@ -1,15 +1,34 @@
 import React, { useState } from 'react';
-import { Search, Image as ImageIcon, AlertTriangle, Upload, Target } from 'lucide-react';
+import { Search, Image as ImageIcon, Upload, Target, Plus, X, CheckCircle } from 'lucide-react';
 import './Analytics.css'; // Reuse styles for now
+import './DefectSearch.css';
 
 const CLOUD_API_URL = import.meta.env.VITE_CLOUD_API_URL || 'http://localhost:8031';
 const EDGE_API_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000';
 
+interface DefectSearchResult {
+  ID: number;
+  SM_ID?: string | null;
+  ItemCode?: string | null;
+  ImageName?: string | null;
+  ErrorDetail?: string | null;
+  distance: number;
+}
+
 export default function DefectSearch() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string>('');
-  const [results, setResults] = useState<any[]>([]);
+  const [results, setResults] = useState<DefectSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [addFile, setAddFile] = useState<File | null>(null);
+  const [addPreview, setAddPreview] = useState('');
+  const [itemCode, setItemCode] = useState('sp1');
+  const [errorDetail, setErrorDetail] = useState('');
+  const [sampleId, setSampleId] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  const [addError, setAddError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -45,6 +64,64 @@ export default function DefectSearch() {
     }
   };
 
+  const closeAddDialog = () => {
+    if (isAdding) return;
+    setShowAddDialog(false);
+    setAddError('');
+  };
+
+  const handleAddFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAddFile(file);
+    setAddPreview(URL.createObjectURL(file));
+    setAddError('');
+  };
+
+  const handleAddDefect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addFile || !itemCode.trim() || !errorDetail.trim()) {
+      setAddError('Vui lòng chọn ảnh, nhập mã sản phẩm và loại lỗi.');
+      return;
+    }
+
+    setIsAdding(true);
+    setAddError('');
+    const formData = new FormData();
+    formData.append('file', addFile);
+    formData.append('ItemCode', itemCode.trim());
+    formData.append('ErrorDetail', errorDetail.trim());
+    formData.append('ImageType', '1');
+    formData.append('Insert_PIC', 'Defect Search');
+    if (sampleId.trim()) formData.append('SM_ID', sampleId.trim());
+
+    try {
+      const response = await fetch(`${CLOUD_API_URL}/photos`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.detail || `Không thể thêm ảnh (HTTP ${response.status}).`);
+      }
+
+      const created = await response.json();
+      setSelectedFile(addFile);
+      setPreview(addPreview);
+      setResults([]);
+      setSuccessMessage(`Đã thêm ảnh lỗi ID ${created.ID} vào Global Database.`);
+      setShowAddDialog(false);
+      setAddFile(null);
+      setAddPreview('');
+      setErrorDetail('');
+      setSampleId('');
+    } catch (error) {
+      setAddError(error instanceof Error ? error.message : 'Không thể thêm ảnh lỗi.');
+    } finally {
+      setIsAdding(false);
+    }
+  };
+
   return (
     <div className="analytics-container">
       <header className="page-header">
@@ -52,7 +129,20 @@ export default function DefectSearch() {
           <h1 className="text-primary">Defect Search</h1>
           <p className="text-muted">Global Defect Similarity Search across all factories (via Cloud PGVector)</p>
         </div>
+        <div className="header-actions">
+          <button className="btn-primary" onClick={() => { setSuccessMessage(''); setShowAddDialog(true); }}>
+            <Plus size={18} /> Add Defect Image
+          </button>
+        </div>
       </header>
+
+      {successMessage && (
+        <div className="defect-success" role="status">
+          <CheckCircle size={18} />
+          <span>{successMessage}</span>
+          <button type="button" onClick={() => setSuccessMessage('')} aria-label="Close notification"><X size={16} /></button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '2rem', marginTop: '1rem' }}>
         {/* Upload Panel */}
@@ -147,6 +237,56 @@ export default function DefectSearch() {
           </div>
         </div>
       </div>
+
+      {showAddDialog && (
+        <div className="defect-modal-overlay" onMouseDown={closeAddDialog}>
+          <div className="defect-modal" role="dialog" aria-modal="true" aria-labelledby="add-defect-title" onMouseDown={(e) => e.stopPropagation()}>
+            <div className="defect-modal-header">
+              <div>
+                <h2 id="add-defect-title">Add Defect Image</h2>
+                <p>Ảnh sẽ được tạo embedding và lưu vào thư viện PostgreSQL.</p>
+              </div>
+              <button type="button" className="icon-button" onClick={closeAddDialog} disabled={isAdding} aria-label="Close">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddDefect}>
+              <div className="defect-modal-body">
+                <label className="defect-upload-field">
+                  {addPreview ? <img src={addPreview} alt="Defect preview" /> : <><Upload size={28} /><span>Select defect image</span></>}
+                  <input type="file" accept="image/*" onChange={handleAddFileChange} />
+                </label>
+
+                <div className="defect-form-grid">
+                  <label>
+                    <span>Item code *</span>
+                    <input value={itemCode} onChange={(e) => setItemCode(e.target.value)} placeholder="sp1" required />
+                  </label>
+                  <label>
+                    <span>Sample ID</span>
+                    <input value={sampleId} onChange={(e) => setSampleId(e.target.value)} placeholder="Optional unique ID" />
+                  </label>
+                  <label className="full-width">
+                    <span>Defect type *</span>
+                    <input value={errorDetail} onChange={(e) => setErrorDetail(e.target.value)} placeholder="Scratch, crack, dent..." required />
+                  </label>
+                </div>
+
+                {addError && <div className="defect-form-error" role="alert">{addError}</div>}
+              </div>
+
+              <div className="defect-modal-footer">
+                <button type="button" className="btn-secondary" onClick={closeAddDialog} disabled={isAdding}>Cancel</button>
+                <button type="submit" className="btn-primary" disabled={isAdding || !addFile}>
+                  {isAdding ? <span className="spinner" /> : <Plus size={18} />}
+                  {isAdding ? 'Adding...' : 'Add to Database'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
