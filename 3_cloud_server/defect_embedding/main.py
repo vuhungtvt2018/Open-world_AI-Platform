@@ -397,6 +397,16 @@ async def sync_up(
             f.write(await file.read())
 
     try:
+        # 19082026 - KHANH - Kiem tra record da dong bo de retry khong tao du lieu trung.
+        existing_record = db.execute(
+            select(InspectionRecord).where(
+                InspectionRecord.edge_node_id == data.get("edge_node_id", "unknown"),
+                InspectionRecord.edge_record_id == data.get("record_id")
+            )
+        ).scalar_one_or_none()
+        if existing_record:
+            return {"status": "success", "message": "Record already synced", "id": existing_record.id}
+
         # Create InspectionRecord
         new_record = InspectionRecord(
             edge_node_id=data.get("edge_node_id", "unknown"),
@@ -439,6 +449,8 @@ async def sync_up(
     except Exception as e:
         print(f"[SERVER SYNC UP] Loi khi luu xuong DB: {e}")
         db.rollback()
+        # 19082026 - KHANH - Tra HTTP 500 de worker khong danh dau thanh cong khi PostgreSQL bi loi.
+        raise HTTPException(status_code=500, detail=f"Database sync failed: {e}")
 
     return {"status": "success", "message": "Synced successfully"}
 
