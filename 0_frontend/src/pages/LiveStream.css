@@ -368,3 +368,146 @@
   border-color: var(--primary);
   color: var(--primary);
 }
+
+/* 19082026 - KIET - Bổ sung trạng thái và form cấu hình API nhưng giữ layout Live Stream cũ. */
+.camera-feedback {
+  padding: 10px 14px;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: 10px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.stream-empty-state,
+.sidebar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.stream-empty-state span {
+  max-width: 420px;
+  font-size: 12px;
+}
+
+.status-dot.disconnected { background: #94a3b8; }
+.status-dot.connecting { background: #f59e0b; }
+.status-dot.error { background: #f43f5e; }
+
+.status-text.online { color: #10b981; }
+.status-text.connecting { color: #f59e0b; }
+.status-text.error { color: #f43f5e; }
+
+.control-btn:disabled,
+.icon-btn:disabled,
+.camera-primary-btn:disabled,
+.camera-secondary-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.empty-camera-card {
+  min-height: 150px;
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.stream-sidebar {
+  max-height: calc(100vh - 170px);
+  overflow-y: auto;
+}
+
+.sidebar-header-sm h3 {
+  flex: 1;
+}
+
+.sidebar-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.camera-config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.camera-config-form label {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.camera-config-form input,
+.camera-config-form select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.camera-config-form input:focus,
+.camera-config-form select:focus {
+  border-color: var(--primary);
+}
+
+.camera-primary-btn,
+.camera-secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.camera-primary-btn {
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: white;
+}
+
+.camera-secondary-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.camera-form-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.camera-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}

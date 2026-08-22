@@ -15,23 +15,22 @@ import EdgeDashboard from './pages/EdgeDashboard';
 import DefectSearch from './pages/DefectSearch';
 import './App.css';
 
-const TabPanel = ({ id, activeTab, children }: { id: string, activeTab: string, children: React.ReactNode }) => (
-  <div 
-    className="tab-panel" 
-    style={{ 
-      display: activeTab === id ? 'block' : 'none',
-      height: '100%' 
-    }}
-  >
-    {children}
-  </div>
-);
+// 15082026 - KIET - Chỉ mount tab đang mở để dừng polling và video stream của tab ẩn.
+const TabPanel = ({ id, activeTab, children }: { id: string, activeTab: string, children: React.ReactNode }) => {
+  if (activeTab !== id) return null;
+
+  return (
+    <div className="tab-panel" style={{ height: '100%' }}>
+      {children}
+    </div>
+  );
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState('overview');
   const [userRole, setUserRole] = useState<'USER' | 'ENGINEER' | 'ADMIN'>('ADMIN');
   const [showScrollTop, setShowScrollTop] = useState(false);
-  const [isEdgeMode, setIsEdgeMode] = useState(window.location.pathname === '/edge');
+  const isEdgeMode = window.location.pathname === '/edge';
   const mainContentRef = useRef<HTMLDivElement>(null);
 
   // If active tab becomes hidden for the current role, switch to overview
@@ -43,6 +42,8 @@ function App() {
     };
 
     if (!ROLE_PERMISSIONS[userRole].includes(activeTab)) {
+      // 15082026 - KIET - Trả về Overview khi role mới không có quyền mở tab hiện tại.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTab('overview');
     }
   }, [userRole, activeTab]);

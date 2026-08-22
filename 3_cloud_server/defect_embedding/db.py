@@ -1,8 +1,13 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from config import settings
-
-engine = create_engine(settings.DATABASE_URL, future=True, echo=False)
+# 17082026 - KIET - Thêm cấu hình connect_args khi sử dụng SQLite
+connect_args = {}
+if settings.DATABASE_URL.startswith("sqlite"):
+    connect_args = {
+        "check_same_thread": False
+    }
+engine = create_engine(settings.DATABASE_URL, future=True, echo=False,  connect_args=connect_args)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
@@ -10,6 +15,11 @@ class Base(DeclarativeBase):
     pass
 
 def ensure_pgvector():
+    # 17082026 - KIET - Bỏ qua pgvector khi test bằng SQLite
+    if engine.dialect.name != "postgresql":
+        print("[DB] SQLite mode - pgvector is disabled")
+        return
+
     with engine.begin() as conn:
         # Bật extension pgvector
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
