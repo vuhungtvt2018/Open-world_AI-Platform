@@ -381,7 +381,7 @@ export default function LiveStream() {
             <div className="stream-metadata">
               <div className="meta-item">
                 <span className="label">Resolution</span>
-                <span className="value">{camStats[selectedCam.id]?.resolution || selectedCam.resolution}</span>
+                <span className="value">{selectedCam.resolution || selectedCam.resolution}</span>
               </div>
               <div className="meta-item">
                 <span className="label">Source</span>
