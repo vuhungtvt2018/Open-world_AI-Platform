@@ -13,6 +13,9 @@ import {
   Link,
   Unplug,
   Play,
+  Loader2,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 import './LiveStream.css';
 
@@ -96,6 +99,8 @@ export default function LiveStream() {
   const [cameraForm, setCameraForm] = useState<CameraFormState>(EMPTY_CAMERA_FORM);
   const [baslerDevices, setBaslerDevices] = useState<Array<{ serial_number: string; display_name: string }>>([]);
   const [isBusy, setIsBusy] = useState(false);
+  const [isCameraSyncing, setIsCameraSyncing] = useState(false);
+  const [cameraSyncResult, setCameraSyncResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [message, setMessage] = useState('');
 
   const selectedCam = cameras.find((camera) => camera.id === selectedCamId) || cameras[0] || EMPTY_CAMERA;
@@ -237,6 +242,38 @@ export default function LiveStream() {
     }
   };
 
+  // 23082026-KIET-Push camera mới lên Hub trước rồi pull config đúng Edge về UI
+  const syncCameraConfigs = async () => {
+    setIsBusy(true);
+    setIsCameraSyncing(true);
+    setCameraSyncResult(null);
+    setMessage('');
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sync/cameras`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || 'Camera Hub sync failed');
+
+      const runtimeErrorCount = data.runtime_errors?.length || 0;
+      setCameraSyncResult({
+        ok: runtimeErrorCount === 0,
+        message: `Camera Hub sync completed: ${data.pushed_count || 0} pushed, `
+          + `${data.pulled_count || 0} pulled`
+          + (runtimeErrorCount ? `, ${runtimeErrorCount} runtime error(s)` : ''),
+      });
+      await loadCameras();
+    } catch (error) {
+      setCameraSyncResult({
+        ok: false,
+        message: error instanceof Error ? error.message : 'Camera Hub sync failed',
+      });
+    } finally {
+      setIsCameraSyncing(false);
+      setIsBusy(false);
+    }
+  };
+
   // 19082026 - KIET - Connect hoặc disconnect riêng camera đang chọn.
   const setCameraConnection = async (camera: CameraItem) => {
     if (!camera.id) return;
@@ -304,6 +341,36 @@ export default function LiveStream() {
 
   return (
     <div className="livestream-container">
+      {/* 23082026-KIET-Hiển thị popup loading và chặn thao tác trong lúc Camera Hub đang sync */}
+      {isCameraSyncing && (
+        <div className="camera-modal-overlay">
+          <div className="camera-sync-popup glass-panel" onClick={(event) => event.stopPropagation()}>
+            <Loader2 size={44} className="text-primary camera-sync-spinner" />
+            <h3>Syncing with Camera Hub...</h3>
+            <p className="text-muted">Pushing local camera configs and pulling device configs, please wait.</p>
+          </div>
+        </div>
+      )}
+
+      {/* 23082026-KIET-Hiển thị popup kết quả Camera Hub sync giống Model Operation */}
+      {cameraSyncResult && !isCameraSyncing && (
+        <div className="camera-modal-overlay" onClick={() => setCameraSyncResult(null)}>
+          <div
+            className={`camera-sync-popup glass-panel ${cameraSyncResult.ok ? 'success' : 'error'}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            {cameraSyncResult.ok ? (
+              <CheckCircle2 size={44} className="text-success" />
+            ) : (
+              <XCircle size={44} className="text-secondary" />
+            )}
+            <h3>{cameraSyncResult.ok ? 'Sync Successful' : 'Sync Failed'}</h3>
+            <p className="text-muted">{cameraSyncResult.message}</p>
+            <button className="btn-primary" onClick={() => setCameraSyncResult(null)}>OK</button>
+          </div>
+        </div>
+      )}
+
       <header className="page-header">
         <div className="header-info">
           <h1 className="text-primary">Live Stream Center</h1>
@@ -318,7 +385,11 @@ export default function LiveStream() {
             <Zap size={16} className="text-primary" />
             <span>{cameras.filter((camera) => camera.assignedTask).length} AI Tasks Assigned</span>
           </div>
-          <button className="camera-primary-btn" disabled={isBusy} onClick={runAllAssignedTasks}>
+          <button className="camera-hub-sync-btn glow-primary" disabled={isBusy} onClick={syncCameraConfigs}>
+            <RefreshCw size={14} className={isCameraSyncing ? 'camera-sync-spinner' : ''} />
+            {isCameraSyncing ? 'Syncing...' : 'Sync with Camera Hub'}
+          </button>
+          <button className="camera-primary-btn camera-run-all-btn glow-primary" disabled={isBusy} onClick={runAllAssignedTasks}>
             <Play size={14} /> Run All
           </button>
         </div>
@@ -511,7 +582,7 @@ export default function LiveStream() {
                   onChange={(event) => setCameraForm((current) => ({ ...current, assignedTask: (event.target.value || null) as CameraTask }))}
                 >
                   <option value="">No Task</option>
-                  <option value="detection">Object Detection</option>
+                  <option value="detection">Counting</option>
                   <option value="inspection">Inspection</option>
                 </select>
 

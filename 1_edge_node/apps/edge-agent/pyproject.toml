@@ -14,7 +14,8 @@ dependencies = [
     "python-multipart",
     "psutil",
     "opencv-python",
-    "numpy"
+    "numpy",
+    "openpyxl"
 ]
 
 [tool.uv.sources]

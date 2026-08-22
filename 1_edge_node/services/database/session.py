@@ -54,6 +54,23 @@ def migrate_od_columns() -> None:
                 "ADD COLUMN class_name VARCHAR(100)"
             ),
         },
+        "camera_configs": {
+            # 23082026-KIET-Bổ sung trạng thái dirty cho database Edge đã tồn tại
+            "sync_dirty": (
+                "ALTER TABLE camera_configs "
+                "ADD COLUMN sync_dirty BOOLEAN DEFAULT 1"
+            ),
+            # 23082026-KIET-Bổ sung revision Camera Hub cho database Edge đã tồn tại
+            "cloud_revision": (
+                "ALTER TABLE camera_configs "
+                "ADD COLUMN cloud_revision INTEGER DEFAULT 0"
+            ),
+            # 23082026-KIET-Bổ sung thời điểm sync camera gần nhất cho database Edge đã tồn tại
+            "last_synced_at": (
+                "ALTER TABLE camera_configs "
+                "ADD COLUMN last_synced_at DATETIME"
+            ),
+        },
     }
 
     with engine.begin() as connection:

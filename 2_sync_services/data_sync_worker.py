@@ -17,7 +17,22 @@ cfg = load_config()
 import base64
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), cfg["DB_PATH"]))
-EDGE_NODE_ID = cfg.get("EDGE_NODE_ID", "EDGE_001")
+
+
+# 23082026-KIET-Dùng EDGE_CODE của Edge backend làm định danh device thống nhất khi sync
+def load_edge_node_id():
+    edge_config_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../1_edge_node/config.yaml")
+    )
+    try:
+        with open(edge_config_path, "r", encoding="utf-8") as edge_config_file:
+            edge_config = yaml.safe_load(edge_config_file) or {}
+        return edge_config.get("EDGE_CODE") or cfg.get("EDGE_NODE_ID", "EDGE_001")
+    except Exception:
+        return cfg.get("EDGE_NODE_ID", "EDGE_001")
+
+
+EDGE_NODE_ID = load_edge_node_id()
 SYNC_DEFECT_IMAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../1_edge_node/sync_defect_image"))
 os.makedirs(SYNC_DEFECT_IMAGE_DIR, exist_ok=True)
 
@@ -33,6 +48,105 @@ def set_last_sync_time(conn, cursor, value, key="last_inspection_sync_time"):
     else:
         cursor.execute("INSERT INTO sync_states (key, value) VALUES (?, ?)", (key, value))
     conn.commit()
+
+
+# 23082026-KIET-Đảm bảo worker độc lập vẫn nâng cấp được cột camera sync trên Edge DB cũ
+def ensure_camera_sync_columns(conn, cursor):
+    existing_columns = {
+        row[1]
+        for row in cursor.execute("PRAGMA table_info(camera_configs)").fetchall()
+    }
+    if not existing_columns:
+        return
+
+    required_columns = {
+        "sync_dirty": "ALTER TABLE camera_configs ADD COLUMN sync_dirty BOOLEAN DEFAULT 1",
+        "cloud_revision": "ALTER TABLE camera_configs ADD COLUMN cloud_revision INTEGER DEFAULT 0",
+        "last_synced_at": "ALTER TABLE camera_configs ADD COLUMN last_synced_at DATETIME",
+    }
+    for column_name, alter_statement in required_columns.items():
+        if column_name not in existing_columns:
+            cursor.execute(alter_statement)
+    conn.commit()
+
+
+# 23082026-KIET-Tự động push camera config đang dirty từ Edge lên Camera Hub
+def sync_camera_configs(conn, cursor):
+    camera_sync_url = cfg.get("API_SYNC_CAMERA_UP_URL")
+    if not cfg.get("API_SYNC_ENABLE") or not camera_sync_url:
+        return
+
+    cursor.execute(
+        """
+        SELECT camera_id, name, source_type, source_url, serial_number,
+               assigned_task, enabled, width, height, fps, created_at, updated_at,
+               cloud_revision
+        FROM camera_configs
+        WHERE sync_dirty = 1
+        ORDER BY camera_id ASC
+        """
+    )
+    cameras = [
+        {
+            "camera_id": row[0],
+            "name": row[1],
+            "source_type": row[2],
+            "source_url": row[3],
+            "serial_number": row[4],
+            "assigned_task": row[5],
+            "enabled": bool(row[6]),
+            "width": row[7],
+            "height": row[8],
+            "fps": row[9],
+            "created_at": row[10],
+            "updated_at": row[11],
+            "base_revision": int(row[12] or 0),
+        }
+        for row in cursor.fetchall()
+    ]
+    if not cameras:
+        return
+
+    payload = {
+        "edge_node_id": EDGE_NODE_ID,
+        "cameras": cameras,
+    }
+
+    response = requests.post(
+        camera_sync_url,
+        json=payload,
+        timeout=10,
+        proxies={"http": None, "https": None},
+    )
+    if not (200 <= response.status_code < 300):
+        raise RuntimeError(
+            f"Camera sync HTTP {response.status_code}: {response.text}"
+        )
+
+    response_data = response.json()
+    acknowledged_cameras = response_data.get("cameras", [])
+    for camera in acknowledged_cameras:
+        cursor.execute(
+            """
+            UPDATE camera_configs
+            SET sync_dirty = 0,
+                cloud_revision = ?,
+                last_synced_at = CURRENT_TIMESTAMP
+            WHERE camera_id = ?
+              AND (updated_at = ? OR (? IS NULL AND updated_at IS NULL))
+            """,
+            (
+                int(camera.get("revision", 0)),
+                camera.get("camera_id"),
+                camera.get("client_updated_at"),
+                camera.get("client_updated_at"),
+            ),
+        )
+    conn.commit()
+    print(
+        f"[SYNC CAMERA UP] Da dong bo {len(acknowledged_cameras)} camera "
+        f"cua Edge Node {EDGE_NODE_ID}."
+    )
 
 def sync_job():
     print(f"[SYNC DAEMON] Bắt đầu tiến trình độc lập. Quét CSDL tại: {DB_PATH}")
@@ -66,6 +180,18 @@ def sync_job():
                                 Update_Date DATETIME
                               )''')
             conn.commit()
+
+            # 23082026-KIET-Nâng cấp schema camera trước khi worker đọc trạng thái dirty
+            ensure_camera_sync_columns(conn, cursor)
+
+            # 23082026-KIET-Gửi camera config sau khi các bảng Edge đã sẵn sàng
+            try:
+                sync_camera_configs(conn, cursor)
+            except sqlite3.OperationalError as e:
+                if "no such table: camera_configs" not in str(e):
+                    print(f"[SYNC CAMERA UP] Loi database: {e}")
+            except Exception as e:
+                print(f"[SYNC CAMERA UP] Loi dong bo camera: {e}")
             
             last_sync = get_last_sync_time(cursor)
             

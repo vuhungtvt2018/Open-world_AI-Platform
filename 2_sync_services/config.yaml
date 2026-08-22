@@ -4,5 +4,7 @@ API_SYNC_ENABLE: true
 API_SYNC_UP_URL: "http://127.0.0.1:8031/api/sync/up"
 API_SYNC_DOWN_URL: "http://127.0.0.1:8031/api/sync/down"
 API_SYNC_LIBRARY_DOWN_URL: "http://127.0.0.1:8031/api/sync/library/down"
+# 23082026-KIET-Khai báo API đồng bộ cấu hình camera từ Edge lên Cloud
+API_SYNC_CAMERA_UP_URL: "http://127.0.0.1:8031/api/cameras/sync-up"
 PRODUCT_NAME: "sp1"
 EDGE_NODE_ID: "EDGE_001"

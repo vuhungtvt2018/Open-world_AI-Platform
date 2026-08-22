@@ -511,3 +511,108 @@
   justify-content: center;
   gap: 6px;
 }
+
+/* 23082026-KIET-Hiển thị nút Camera Hub giống nút Sync Model Hub */
+.camera-hub-sync-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.camera-hub-sync-btn:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+}
+
+/* 23082026-KIET-Áp dụng hiệu ứng hover xanh của nút Sync cho riêng nút Run All */
+.camera-run-all-btn {
+  transition: all 0.2s ease;
+}
+
+.camera-run-all-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+  box-shadow: 0 0 18px var(--primary-glow);
+}
+
+.camera-hub-sync-btn:disabled,
+.camera-hub-sync-btn:hover:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+/* 23082026-KIET-Hiển thị trạng thái đang đồng bộ camera với Camera Hub */
+.camera-sync-spinner {
+  animation: camera-sync-spin 0.9s linear infinite;
+}
+
+@keyframes camera-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 23082026-KIET-Hiển thị popup loading và kết quả Camera Hub độc lập với trang Model */
+.camera-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.camera-sync-popup {
+  width: 100%;
+  max-width: 500px;
+  box-sizing: border-box;
+  background: var(--surface) !important;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 36px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  animation: camera-sync-modal-scale 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.camera-sync-popup h3 {
+  font-size: 18px;
+}
+
+.camera-sync-popup p {
+  max-width: 320px;
+  font-size: 13px;
+}
+
+.camera-sync-popup .btn-primary {
+  min-width: 96px;
+  margin-top: 8px;
+}
+
+@keyframes camera-sync-modal-scale {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

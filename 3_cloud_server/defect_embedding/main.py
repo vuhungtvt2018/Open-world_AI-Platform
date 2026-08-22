@@ -1,17 +1,25 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
-from sqlalchemy import select, text, bindparam, func
+from sqlalchemy import select, text, bindparam, func, inspect
 from sqlalchemy.orm import Session
 from pgvector.sqlalchemy import Vector
 from config import settings
-from typing import Optional, List
+from typing import Optional, List, Literal
+from pydantic import BaseModel, Field
 from uuid import uuid4
 from datetime import datetime
 import os, io, json
 import dateutil.parser
 
 from db import Base, engine, SessionLocal, ensure_pgvector
-from models import QCProductPhotoLibrary, CloudAIModel, InspectionRecord, BoltObject, AnomalyDetail
+from models import (
+    QCProductPhotoLibrary,
+    CloudAIModel,
+    CloudCameraConfig,
+    InspectionRecord,
+    BoltObject,
+    AnomalyDetail,
+)
 from schemas import (
     PhotoCreate, PhotoRead, PhotoUpdateErrorDetail,
     SearchRequestByImage, SearchResultItem
@@ -38,11 +46,46 @@ if engine.dialect.name == "sqlite":
         bind=engine,
         checkfirst=True
     )
+    # 23082026-KIET-Tạo bảng camera sync khi Cloud Server chạy bằng SQLite
+    CloudCameraConfig.__table__.create(
+        bind=engine,
+        checkfirst=True,
+    )
 
 # 17082026 - KIET - Giữ cơ chế tạo đầy đủ database khi dùng PostgreSQL
 else:
     ensure_pgvector()
     Base.metadata.create_all(bind=engine)
+
+
+# 23082026-KIET-Bổ sung các cột camera sync cho database Cloud đã tồn tại
+def migrate_cloud_camera_columns() -> None:
+    deleted_at_type = "TIMESTAMP" if engine.dialect.name == "postgresql" else "DATETIME"
+    required_columns = {
+        "revision": (
+            "ALTER TABLE cloud_camera_configs "
+            "ADD COLUMN revision INTEGER DEFAULT 1"
+        ),
+        "updated_source": (
+            "ALTER TABLE cloud_camera_configs "
+            "ADD COLUMN updated_source VARCHAR(20) DEFAULT 'edge'"
+        ),
+        "deleted_at": (
+            "ALTER TABLE cloud_camera_configs "
+            f"ADD COLUMN deleted_at {deleted_at_type}"
+        ),
+    }
+    with engine.begin() as connection:
+        existing_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("cloud_camera_configs")
+        }
+        for column_name, alter_statement in required_columns.items():
+            if column_name not in existing_columns:
+                connection.execute(text(alter_statement))
+
+
+migrate_cloud_camera_columns()
 
 # --- IVFFLAT index tạo như cũ (cosine) ---
 if settings.ENABLE_IVFFLAT_INDEX and  engine.dialect.name == "postgresql":
@@ -514,7 +557,6 @@ def sync_library_down(last_update: Optional[str] = Query(None), db: Session = De
 
 
 # --- AI Models APIs ---
-from pydantic import BaseModel
 
 @app.get("/api/models/latest")
 def get_latest_models(db: Session = Depends(get_db)):
@@ -527,6 +569,7 @@ def get_latest_models(db: Session = Depends(get_db)):
                 "name": m.name,
                 "type": m.type,
                 "format": m.format,
+                "status": m.status,
                 "version": m.version,
                 "map_acc": m.map_acc,
                 "speed_ms": m.speed_ms
@@ -563,13 +606,162 @@ def sync_models_up(req: SyncModelsPayload, db: Session = Depends(get_db)):
                 db.add(new_model)
                 updated_count += 1
             else:
-                if existing.version != m.version or existing.status != m.status:
+                model_changed = any([
+                    existing.name != m.name,
+                    existing.type != m.type,
+                    existing.format != m.format,
+                    existing.version != m.version,
+                    existing.map_acc != m.map_acc,
+                    existing.status != m.status,
+                    existing.file_path != m.file_path,
+                    existing.speed_ms != m.speed_ms,
+                ])
+                if model_changed:
+                    # 22082026 - KIET - Đồng bộ cả speed_ms khi version model không thay đổi.
+                    existing.name = m.name
+                    existing.type = m.type
+                    existing.format = m.format
                     existing.version = m.version
                     existing.map_acc = m.map_acc
                     existing.status = m.status
+                    existing.file_path = m.file_path
                     existing.speed_ms = m.speed_ms
                     updated_count += 1
         db.commit()
         return {"status": "success", "synced_count": updated_count}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+
+# 23082026-KIET-Chuẩn hóa một cấu hình camera nhận từ Edge Node
+class SyncCameraRequest(BaseModel):
+    camera_id: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=150)
+    source_type: Literal["rtsp", "basler"]
+    source_url: Optional[str] = None
+    serial_number: Optional[str] = None
+    assigned_task: Optional[Literal["detection", "inspection"]] = None
+    enabled: bool = False
+    width: Optional[int] = None
+    height: Optional[int] = None
+    fps: Optional[float] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    base_revision: int = 0
+
+
+# 23082026-KIET-Chuẩn hóa payload đồng bộ camera của một Edge Node
+class SyncCamerasPayload(BaseModel):
+    edge_node_id: str = Field(min_length=1, max_length=100)
+    cameras: List[SyncCameraRequest]
+
+
+@app.post("/api/cameras/sync-up")
+def sync_cameras_up(req: SyncCamerasPayload, db: Session = Depends(get_db)):
+    """23082026-KIET-Upsert cấu hình camera của Edge Node lên Cloud Server."""
+
+    try:
+        synced_count = 0
+        camera_revisions = []
+        for camera in req.cameras:
+            existing = db.get(
+                CloudCameraConfig,
+                (req.edge_node_id, camera.camera_id),
+            )
+            camera_data = camera.model_dump()
+
+            if existing is None:
+                existing = CloudCameraConfig(
+                    edge_node_id=req.edge_node_id,
+                    camera_id=camera.camera_id,
+                    name=camera.name,
+                    source_type=camera.source_type,
+                    revision=1,
+                    updated_source="edge",
+                )
+                db.add(existing)
+                config_changed = True
+            else:
+                # 23082026-KIET-Chỉ tăng revision khi nội dung camera thực sự thay đổi
+                config_changed = any([
+                    existing.name != camera.name,
+                    existing.source_type != camera.source_type,
+                    existing.source_url != camera.source_url,
+                    existing.serial_number != camera.serial_number,
+                    existing.assigned_task != camera.assigned_task,
+                    existing.enabled != camera.enabled,
+                    existing.width != camera.width,
+                    existing.height != camera.height,
+                    existing.fps != camera.fps,
+                    existing.deleted_at is not None,
+                ])
+                if config_changed:
+                    existing.revision = int(existing.revision or 0) + 1
+
+            existing.name = camera_data["name"]
+            existing.source_type = camera_data["source_type"]
+            existing.source_url = camera_data["source_url"]
+            existing.serial_number = camera_data["serial_number"]
+            existing.assigned_task = camera_data["assigned_task"]
+            existing.enabled = camera_data["enabled"]
+            existing.width = camera_data["width"]
+            existing.height = camera_data["height"]
+            existing.fps = camera_data["fps"]
+            existing.edge_created_at = camera_data["created_at"]
+            existing.edge_updated_at = camera_data["updated_at"]
+            existing.updated_source = "edge"
+            existing.deleted_at = None
+            existing.synced_at = datetime.now()
+            if config_changed:
+                synced_count += 1
+            camera_revisions.append({
+                "camera_id": camera.camera_id,
+                "revision": existing.revision,
+                "client_updated_at": camera.updated_at,
+            })
+
+        db.commit()
+        return {
+            "status": "success",
+            "edge_node_id": req.edge_node_id,
+            "synced_count": synced_count,
+            "cameras": camera_revisions,
+        }
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Camera config sync failed: {exc}",
+        ) from exc
+
+
+@app.get("/api/cameras/sync-down/{edge_node_id}")
+def sync_cameras_down(edge_node_id: str, db: Session = Depends(get_db)):
+    """23082026-KIET-Trả camera config thuộc đúng Edge Node từ Camera Hub."""
+
+    cameras = db.query(CloudCameraConfig).filter(
+        CloudCameraConfig.edge_node_id == edge_node_id,
+        CloudCameraConfig.deleted_at.is_(None),
+    ).order_by(CloudCameraConfig.camera_id.asc()).all()
+    return {
+        "status": "success",
+        "edge_node_id": edge_node_id,
+        "cameras": [
+            {
+                "camera_id": camera.camera_id,
+                "name": camera.name,
+                "source_type": camera.source_type,
+                "source_url": camera.source_url,
+                "serial_number": camera.serial_number,
+                "assigned_task": camera.assigned_task,
+                "enabled": camera.enabled,
+                "width": camera.width,
+                "height": camera.height,
+                "fps": camera.fps,
+                "revision": camera.revision,
+                "updated_source": camera.updated_source,
+                "updated_at": str(camera.synced_at) if camera.synced_at else None,
+            }
+            for camera in cameras
+        ],
+    }

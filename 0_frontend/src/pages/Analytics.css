@@ -10,6 +10,33 @@
   gap: 12px;
 }
 
+/* 23082026-KIET-Hiển thị bộ chọn Counting và Defect Analytics trong header */
+.analytics-mode-switch {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.analytics-mode-switch button {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.analytics-mode-switch button.active {
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 4px 12px var(--primary-glow);
+}
+
 .date-picker {
   display: flex;
   align-items: center;
@@ -41,6 +68,14 @@
 .export-btn:hover {
   filter: brightness(1.1);
   transform: translateY(-1px);
+}
+
+/* 23082026-KIET-Khóa nút Export trong lúc backend đang tạo workbook hai sheet */
+.export-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
 }
 
 .stats-row {
@@ -122,4 +157,23 @@
   font-size: 16px;
   font-weight: 700;
   color: var(--text);
+}
+
+/* 23082026-KIET-Hiển thị lỗi API và trạng thái chart không có dữ liệu */
+.analytics-feedback {
+  padding: 10px 14px;
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  border-radius: 10px;
+  background: rgba(244, 63, 94, 0.08);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.analytics-empty-chart {
+  height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
 }

@@ -113,6 +113,12 @@ class CameraConfig(Base):
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     fps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 23082026-KIET-Đánh dấu camera config cục bộ cần được đẩy lên Camera Hub
+    sync_dirty: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 23082026-KIET-Lưu revision gần nhất Camera Hub đã xác nhận cho camera
+    cloud_revision: Mapped[int] = mapped_column(Integer, default=0)
+    # 23082026-KIET-Lưu thời điểm camera config đồng bộ thành công gần nhất
+    last_synced_at: Mapped[str | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[str] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[str] = mapped_column(
         DateTime,

@@ -61,55 +61,96 @@
   min-width: 0;
 }
 
+/* 22082026 - PHUC - Filter bar: search + tab pill + đếm số kết quả */
 .browser-filters {
   display: flex;
-  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-left: auto;
 }
 
 .search-mini {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   background: var(--background);
   padding: 0 12px;
-  border-radius: 8px;
+  height: 34px;
+  border-radius: 10px;
   border: 1px solid var(--border);
+  transition: border-color 0.2s, box-shadow 0.2s;
 }
 
+/* Viền sáng màu primary khi đang nhập */
+.search-mini:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-glow);
+}
+
+/* 22082026 - PHUC - Đè style global input (!important) của index.css
+   để ô search không bị thành hộp có viền riêng bên trong khung search */
 .search-mini input {
-  background: none;
-  border: none;
+  background: transparent !important;
+  border: none !important;
   font-size: 12px;
-  padding: 8px 0;
-  width: 120px;
+  color: var(--text) !important;
+  padding: 8px 2px;
+  width: 170px;
 }
 
-.search-mini input:focus { outline: none; }
+.search-mini input::placeholder {
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.search-mini input:focus {
+  outline: none;
+  border-color: transparent !important;
+}
 
 .tab-group {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   background: var(--background);
-  padding: 4px;
-  border-radius: 8px;
+  padding: 3px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
 }
 
 .tab-group button {
-  padding: 4px 12px;
+  padding: 5px 14px;
   border: none;
-  background: none;
+  background: transparent;
   font-size: 11px;
   font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--text-muted);
-  border-radius: 6px;
+  border-radius: 7px;
   cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.tab-group button:hover:not(.active) {
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 .tab-group button.active {
-  background: var(--surface);
+  background: var(--primary-glow);
   color: var(--primary);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: inset 0 0 0 1px var(--primary), 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+.filter-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  background: var(--background);
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  white-space: nowrap;
 }
 
 /* Image Grid */
@@ -335,4 +376,200 @@
 
 .reviewer .count {
   color: var(--text-muted);
+}
+
+/* 22082026 - PHUC - Popup xem chi tiết ảnh khi bấm vào ảnh trong Image Browser */
+.dataset-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.dataset-modal-content {
+  width: 100%;
+  max-width: 1100px;
+  max-height: 90vh;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
+  animation: datasetModalIn 0.2s ease-out;
+}
+
+@keyframes datasetModalIn {
+  from {
+    transform: scale(0.96);
+    opacity: 0;
+  }
+
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.dataset-modal-header {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.dataset-modal-header h3 {
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+
+.dataset-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.dataset-modal-close:hover {
+  color: var(--secondary);
+  border-color: var(--secondary);
+}
+
+.dataset-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.dataset-modal-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dataset-modal-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dataset-modal-figure {
+  position: relative;
+  flex: 1;
+  min-height: 260px;
+  max-height: 58vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #111318;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.dataset-modal-figure img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.dataset-modal-footer {
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.dataset-modal-footer .dataset-class-counts {
+  margin: 0;
+}
+
+/* 22082026 - PHUC - Bộ công cụ zoom trong header popup */
+.dataset-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.modal-tool-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.modal-tool-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-glow);
+  transform: translateY(-1px);
+}
+
+.zoom-value {
+  min-width: 44px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+/* Viewport zoom + pan: transform đặt từ inline style */
+.dataset-modal-viewport {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.18s ease-out;
+  will-change: transform;
+}
+
+.dataset-modal-figure.draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.dataset-modal-figure.dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+/* Khi đang kéo thì tắt animation cho mượt theo tay */
+.dataset-modal-figure.dragging .dataset-modal-viewport {
+  transition: none;
 }

@@ -1,16 +1,20 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Database, 
-  Upload, 
-  Tag, 
-  Layers, 
-  Image as ImageIcon, 
-  CheckCircle, 
-  Clock, 
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Database,
+  Upload,
+  Tag,
+  Layers,
+  Image as ImageIcon,
+  CheckCircle,
+  Clock,
   Plus,
   Filter,
   BrainCircuit,
-  Eye
+  Eye,
+  X,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import DetectionResultImage, {
   type DetectionObject,
@@ -115,7 +119,71 @@ export default function DatasetManagement() {
     { label: 'Pending', value: '...', color: '#f59e0b' },
   ]);
   const [images, setImages] = useState<DatasetImage[]>([]);
+  // 22082026 - PHUC - Giá trị filter giữ 'Detection' để khớp type từ BE, chỉ đổi nhãn hiển thị thành Counting.
   const [filter, setFilter] = useState<'All' | 'Detection' | 'OK' | 'NG'>('All');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [previewImage, setPreviewImage] = useState<DatasetImage | null>(null);
+  // 22082026 - PHUC - Zoom & pan cho popup xem ảnh (kéo khi đã phóng to, double-click reset).
+  const [previewZoom, setPreviewZoom] = useState(1);
+  const [previewOffset, setPreviewOffset] = useState({ x: 0, y: 0 });
+  const [isDraggingPreview, setIsDraggingPreview] = useState(false);
+  const previewDragStart = useRef<{ mouseX: number; mouseY: number; baseX: number; baseY: number } | null>(null);
+
+  // 22082026 - PHUC - Mở popup luôn reset zoom/pan về mặc định.
+  const openPreview = (image: DatasetImage) => {
+    setPreviewImage(image);
+    resetPreviewView();
+  };
+
+  const resetPreviewView = () => {
+    setPreviewZoom(1);
+    setPreviewOffset({ x: 0, y: 0 });
+    setIsDraggingPreview(false);
+    previewDragStart.current = null;
+  };
+
+  const stepPreviewZoom = (delta: number) => {
+    setPreviewZoom((current) => Math.min(3, Math.max(0.5, +(current + delta).toFixed(2))));
+  };
+
+  // 22082026 - PHUC - Pan bằng cách kéo chuột khi zoom > 100%.
+  const startPreviewDrag = (event: React.MouseEvent) => {
+    if (previewZoom <= 1) return;
+    event.preventDefault();
+    setIsDraggingPreview(true);
+    previewDragStart.current = {
+      mouseX: event.clientX,
+      mouseY: event.clientY,
+      baseX: previewOffset.x,
+      baseY: previewOffset.y,
+    };
+  };
+
+  const movePreviewDrag = (event: React.MouseEvent) => {
+    const drag = previewDragStart.current;
+    if (!drag) return;
+    setPreviewOffset({
+      x: drag.baseX + (event.clientX - drag.mouseX),
+      y: drag.baseY + (event.clientY - drag.mouseY),
+    });
+  };
+
+  const endPreviewDrag = () => {
+    previewDragStart.current = null;
+    setIsDraggingPreview(false);
+  };
+
+  // 22082026 - PHUC - Esc đóng popup xem ảnh.
+  useEffect(() => {
+    if (!previewImage) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewImage(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewImage]);
 
   useEffect(() => {
     let isMounted = true;
@@ -150,9 +218,22 @@ export default function DatasetManagement() {
     return <Clock size={20} />;
   };
 
+  const normalizedQuery = searchQuery.trim().toLowerCase();
   const filteredImages = images.filter((image) => {
-    if (filter === 'All') return true;
-    return image.type === filter;
+    if (filter !== 'All' && image.type !== filter) return false;
+
+    if (!normalizedQuery) return true;
+
+    // 22082026 - PHUC - Ô search lọc theo tên ảnh, product và các class đã đếm.
+    const haystack = [
+      image.name,
+      image.product,
+      ...Object.keys(image.counts_by_class || {}),
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    return haystack.includes(normalizedQuery);
   });
 
   return (
@@ -190,14 +271,23 @@ export default function DatasetManagement() {
             <div className="browser-filters">
               <div className="search-mini">
                 <Filter size={14} className="text-muted" />
-                <input type="text" placeholder="Filter by tag..." />
+                {/* 22082026 - PHUC - Bật ô search lọc theo tên ảnh / product / class. */}
+                <input
+                  type="text"
+                  placeholder="Filter by name or class..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
               </div>
               <div className="tab-group">
                 <button className={filter === 'All' ? 'active' : ''} onClick={() => setFilter('All')}>All</button>
-                <button className={filter === 'Detection' ? 'active' : ''} onClick={() => setFilter('Detection')}>Detection</button>
+                {/* 22082026 - PHUC - Nhãn hiển thị là Counting, giá trị filter vẫn là 'Detection'. */}
+                <button className={filter === 'Detection' ? 'active' : ''} onClick={() => setFilter('Detection')}>Counting</button>
                 <button className={filter === 'OK' ? 'active' : ''} onClick={() => setFilter('OK')}>OK</button>
                 <button className={filter === 'NG' ? 'active' : ''} onClick={() => setFilter('NG')}>NG</button>
               </div>
+              {/* 22082026 - PHUC - Đếm số ảnh đang hiển thị để thấy rõ filter có chạy. */}
+              <span className="filter-count">{filteredImages.length} ảnh</span>
             </div>
           </div>
 
@@ -208,9 +298,14 @@ export default function DatasetManagement() {
                   <span className="text-xs text-muted mb-1 block" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {img.product || 'Product'} / {img.date}
                   </span>
-                  <div className="image-placeholder" style={{ padding: 0, overflow: 'hidden', height: '160px' }}>
-                    <img 
-                      src={`${API_BASE_URL}/api/image/${img.name}`} 
+                  {/* 22082026 - PHUC - Bấm vào ảnh mở popup xem chi tiết. */}
+                  <div
+                    className="image-placeholder clickable"
+                    style={{ padding: 0, overflow: 'hidden', height: '160px', cursor: 'pointer' }}
+                    onClick={() => openPreview(img)}
+                  >
+                    <img
+                      src={`${API_BASE_URL}/api/image/${img.name}`}
                       alt={img.name}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       onError={(e) => {
@@ -220,15 +315,25 @@ export default function DatasetManagement() {
                     />
                     <ImageIcon size={32} className="text-muted opacity-20 fallback-svg" style={{ display: 'none' }} />
                     <div className="image-overlay">
-                      <button className="overlay-btn"><Eye size={16} /></button>
-                      <button className="overlay-btn"><Tag size={16} /></button>
+                      <button className="overlay-btn" title="Xem ảnh"><Eye size={16} /></button>
+                      <button
+                        className="overlay-btn"
+                        title="Gắn nhãn"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Tag size={16} />
+                      </button>
                     </div>
                   </div>
                 </div>
                 
                 <div style={{ flex: 1 }}>
                   <span className="text-xs text-muted mb-1 block">Result</span>
-                  <div className="image-placeholder" style={{ padding: 0, overflow: 'hidden', height: '160px' }}>
+                  <div
+                    className="image-placeholder clickable"
+                    style={{ padding: 0, overflow: 'hidden', height: '160px', cursor: 'pointer' }}
+                    onClick={() => openPreview(img)}
+                  >
                     {img.task_type === 'detection' ? (
                       <DatasetDetectionResult recordId={img.id} />
                     ) : (
@@ -246,7 +351,7 @@ export default function DatasetManagement() {
                       </>
                     )}
                     <div className="image-overlay">
-                      <button className="overlay-btn"><Eye size={16} /></button>
+                      <button className="overlay-btn" title="Xem kết quả"><Eye size={16} /></button>
                     </div>
                   </div>
                 </div>
@@ -255,7 +360,9 @@ export default function DatasetManagement() {
                   <span className="img-name text-xs" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{img.name}</span>
                   <div className="img-tags">
                     <span className={`tag status ${img.status}`}>{img.status}</span>
-                    <span className={`tag type ${img.type.toLowerCase()}`}>{img.type}</span>
+                    <span className={`tag type ${img.type.toLowerCase()}`}>
+                      {img.type === 'Detection' ? 'Counting' : img.type}
+                    </span>
                     {img.task_type === 'detection' && (
                       <span className="tag object-count">{img.total_objects} objects</span>
                     )}
@@ -328,6 +435,101 @@ export default function DatasetManagement() {
           </section>
         </aside>
       </div>
+
+      {/* 22082026 - PHUC - Popup xem chi tiết ảnh: bấm vào ảnh hoặc nút Eye để mở. */}
+      {previewImage && (
+        <div className="dataset-modal-overlay" onClick={() => setPreviewImage(null)}>
+          <div className="dataset-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="dataset-modal-header">
+              <div>
+                <h3>{previewImage.name}</h3>
+                <div className="img-tags">
+                  <span className={`tag status ${previewImage.status}`}>{previewImage.status}</span>
+                  <span className={`tag type ${previewImage.type.toLowerCase()}`}>
+                    {previewImage.type === 'Detection' ? 'Counting' : previewImage.type}
+                  </span>
+                  {previewImage.task_type === 'detection' && (
+                    <span className="tag object-count">{previewImage.total_objects} objects</span>
+                  )}
+                </div>
+                <span className="text-xs text-muted">
+                  {previewImage.product || 'Product'} • {previewImage.date}
+                </span>
+              </div>
+              {/* 22082026 - PHUC - Bộ công cụ zoom VIP cho popup xem ảnh. */}
+              <div className="dataset-modal-actions">
+                <button className="modal-tool-btn" title="Thu nhỏ (tối thiểu 50%)" onClick={() => stepPreviewZoom(-0.25)}>
+                  <ZoomOut size={15} />
+                </button>
+                <span className="zoom-value">{Math.round(previewZoom * 100)}%</span>
+                <button className="modal-tool-btn" title="Phóng to (tối đa 300%)" onClick={() => stepPreviewZoom(0.25)}>
+                  <ZoomIn size={15} />
+                </button>
+                <button className="modal-tool-btn" title="Về mặc định (hoặc nhấp đúp vào ảnh)" onClick={resetPreviewView}>
+                  <RotateCcw size={15} />
+                </button>
+                <button className="dataset-modal-close" title="Đóng (Esc)" onClick={() => setPreviewImage(null)}>
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div
+              className={`dataset-modal-body ${previewZoom > 1 ? 'zoomed' : ''}`}
+              onMouseMove={movePreviewDrag}
+              onMouseUp={endPreviewDrag}
+              onMouseLeave={endPreviewDrag}
+            >
+              <div className="dataset-modal-panel">
+                <span className="dataset-modal-label">Original</span>
+                <div
+                  className={`dataset-modal-figure ${previewZoom > 1 ? (isDraggingPreview ? 'dragging' : 'draggable') : ''}`}
+                  title={previewZoom > 1 ? 'Kéo chuột để di chuyển • Nhấp đúp để reset' : 'Nhấp đúp để bật chế độ zoom'}
+                  onMouseDown={startPreviewDrag}
+                  onDoubleClick={() => (previewZoom > 1 ? resetPreviewView() : setPreviewZoom(2))}
+                >
+                  <div
+                    className="dataset-modal-viewport"
+                    style={{ transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewZoom})` }}
+                  >
+                    <img src={`${API_BASE_URL}/api/image/${previewImage.name}`} alt={previewImage.name} draggable={false} />
+                  </div>
+                </div>
+              </div>
+
+              {previewImage.task_type === 'detection' && (
+                <div className="dataset-modal-panel">
+                  <span className="dataset-modal-label">Result (Counting)</span>
+                  <div
+                    className={`dataset-modal-figure ${previewZoom > 1 ? (isDraggingPreview ? 'dragging' : 'draggable') : ''}`}
+                    title={previewZoom > 1 ? 'Kéo chuột để di chuyển • Nhấp đúp để reset' : undefined}
+                    onMouseDown={startPreviewDrag}
+                    onDoubleClick={() => (previewZoom > 1 ? resetPreviewView() : setPreviewZoom(2))}
+                  >
+                    <div
+                      className="dataset-modal-viewport"
+                      style={{ transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewZoom})` }}
+                    >
+                      <DatasetDetectionResult recordId={previewImage.id} />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {Object.keys(previewImage.counts_by_class || {}).length > 0 && (
+              <div className="dataset-modal-footer">
+                <span className="text-xs text-muted">Số lượng theo class</span>
+                <div className="dataset-class-counts">
+                  {Object.entries(previewImage.counts_by_class).map(([className, count]) => (
+                    <span key={className}>{className}: {count}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

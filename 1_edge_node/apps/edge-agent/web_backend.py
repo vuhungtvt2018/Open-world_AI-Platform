@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 
 
 import cv2
+import re
 import time
 import numpy as np
 import shutil
@@ -37,6 +38,8 @@ from packages.utils.utils import (ts, union_box, pad_and_clip_box,
 from packages.utils.visualize import concat_anomaly_crops
 from services.database.session import init_db, SessionLocal
 from services.database.crud import (
+    acknowledge_camera_configs,
+    apply_cloud_camera_configs,
     create_inspection_record,
     get_camera_config,
     list_camera_configs,
@@ -410,10 +413,12 @@ class WebInference:
             frame = camera.read()
             return frame
 
-        if input_mode not in (None, "folder") and cam_id != "default":
+        # 22082026 - PHUC - Camera ID cụ thể đã tắt/chưa connect thì KHÔNG fallback sang ảnh RAM,
+        # tránh feed và inference hiện nhầm ảnh upload ở Vision Inspection sau khi tắt camera.
+        if cam_id != "default" and input_mode is None:
             return None
 
-        # Lấy ảnh trực tiếp từ RAM (không đọc ổ cứng)
+        # Lấy ảnh trực tiếp từ RAM (không đọc ổ cứng) - chỉ dành cho folder mode hoặc cam default
         if self.current_frame is None:
             return None
         return self.current_frame.copy()
@@ -1291,8 +1296,27 @@ async def get_dataset_stats():
     finally:
         db.close()
 
+def _parse_model_speed_ms(speed_value) -> float:
+    """
+    22082026 - KIET - Chuyển metadata speed_ms của từng model thành số millisecond.
+    """
+
+    if speed_value is None:
+        return 0.0
+
+    match = re.search(r"-?\d+(?:\.\d+)?", str(speed_value))
+    if match is None:
+        return 0.0
+
+    return max(0.0, float(match.group(0)))
+
+
 @app.get("/model-registry")
 async def get_model_registry():
+    """
+    22082026 - KIET - Trả model registry kèm latency và resource metrics theo schema ổn định.
+    """
+
     from services.database.models import AIModel
     db = SessionLocal()
     try:
@@ -1323,19 +1347,45 @@ async def get_model_registry():
             { "name": 'Free', "value": round(100 - vram_usage, 1), "color": '#e2e8f0' },
         ]
         
-        # Breakdown of latency (simulate based on total 302ms)
-        latencyData = [
-            { "stage": 'Detection', "time": 45, "color": '#3b82f6' },
-            { "stage": 'Alignment', "time": 32, "color": '#10b981' },
-            { "stage": 'Segmentation', "time": 58, "color": '#6366f1' },
-            { "stage": 'Anomaly', "time": 145, "color": '#f59e0b' },
-            { "stage": 'Classification', "time": 22, "color": '#f43f5e' },
+        # 22082026 - KIET - Dựng latency chart từ speed_ms của model hiện có sau khi sync.
+        latency_colors = [
+            "#3b82f6",
+            "#10b981",
+            "#6366f1",
+            "#f59e0b",
+            "#f43f5e",
+            "#8b5cf6",
         ]
+        latencyData = [
+            {
+                "stage": f"{model.type} ({model.id})",
+                "time": _parse_model_speed_ms(model.speed_ms),
+                "color": latency_colors[index % len(latency_colors)],
+                "modelId": model.id,
+                "modelName": model.name,
+                "modelType": model.type,
+            }
+            for index, model in enumerate(models)
+        ]
+        pipeline_latency = round(
+            sum(item["time"] for item in latencyData),
+            2,
+        )
+
+        valid_map_values = [
+            float(model.map_acc)
+            for model in models
+            if model.map_acc is not None
+        ]
+        registry_map = round(
+            sum(valid_map_values) / len(valid_map_values),
+            2,
+        ) if valid_map_values else 0.0
 
         return {
             "activeEngine": "v2.4.1 Stable",
-            "pipelineLatency": 302,
-            "mAP": 91.4,
+            "pipelineLatency": pipeline_latency,
+            "mAP": registry_map,
             "models": model_list,
             "latencyData": latencyData,
             "resourceData": resourceData,
@@ -1344,7 +1394,20 @@ async def get_model_registry():
         }
     except Exception as e:
         print(f"Error fetching models: {e}")
-        return {"models": []}
+        # 22082026 - KIET - Giữ đủ field response khi database hoặc hardware metrics gặp lỗi.
+        return {
+            "activeEngine": "Unavailable",
+            "pipelineLatency": 0,
+            "mAP": 0,
+            "models": [],
+            "latencyData": [],
+            "resourceData": [
+                {"name": "GPU Memory", "value": 0, "color": "#2563eb"},
+                {"name": "Free", "value": 100, "color": "#e2e8f0"},
+            ],
+            "cpuThreads": 0,
+            "npuLoad": 0,
+        }
     finally:
         db.close()
 
@@ -1367,9 +1430,322 @@ async def get_system_health():
         "gpu_load": round(gpu_load, 1)
     }
 
+# 23082026-KIET-Query record Analytics theo ngày Việt Nam và task mode để tái sử dụng khi export
+def _query_analytics_records(db, date: str, mode: Literal["counting", "defect"]):
+    from datetime import datetime, timedelta
+    from sqlalchemy import or_
+    from sqlalchemy.orm import selectinload
+    from services.database.models import BoltObject
+
+    if date:
+        try:
+            target_local = datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            target_local = datetime.utcnow() + timedelta(hours=7)
+            target_local = target_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        target_local = datetime.utcnow() + timedelta(hours=7)
+        target_local = target_local.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    day_start_utc = target_local - timedelta(hours=7)
+    day_end_utc = day_start_utc + timedelta(days=1)
+
+    query = db.query(InspectionRecord).options(
+        selectinload(InspectionRecord.objects).selectinload(BoltObject.anomalies)
+    ).filter(
+        InspectionRecord.created_at >= day_start_utc,
+        InspectionRecord.created_at < day_end_utc,
+    )
+    if mode == "counting":
+        query = query.filter(InspectionRecord.task_type == "detection")
+    else:
+        query = query.filter(or_(
+            InspectionRecord.task_type == "inspection",
+            InspectionRecord.task_type.is_(None),
+        ))
+    return query.order_by(InspectionRecord.created_at.asc()).all()
+
+
+@app.get("/analytics")
+async def get_analytics(
+    date: str = None,
+    mode: Literal["counting", "defect"] = "defect",
+):
+    """23082026-KIET-Trả analytics riêng cho Counting hoặc Defect theo ngày Việt Nam."""
+
+    db = SessionLocal()
+    try:
+        records = _query_analytics_records(db, date, mode)
+
+        avg_cycle_time = round(
+            sum(float(record.latency_ms or 0) for record in records)
+            / len(records)
+            / 1000,
+            3,
+        ) if records else 0.0
+        visible_hours = set(range(8, 18))
+        colors = ["#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#f43f5e"]
+
+        if mode == "counting":
+            # 23082026-KIET-Tính số object và phân bố class chỉ từ record Detection
+            hourly_counts = {hour: 0 for hour in range(24)}
+            class_counts = {}
+            total_objects = 0
+            for record in records:
+                object_count = int(record.total_objects or len(record.objects))
+                total_objects += object_count
+                if record.created_at:
+                    local_hour = (record.created_at.hour + 7) % 24
+                    hourly_counts[local_hour] += object_count
+                for obj in record.objects:
+                    class_name = obj.class_name or "unknown"
+                    class_counts[class_name] = class_counts.get(class_name, 0) + 1
+
+            active_hours = visible_hours | {
+                hour for hour, count in hourly_counts.items() if count > 0
+            }
+            hourly_counting_data = [
+                {"hour": f"{hour:02d}h", "count": hourly_counts[hour]}
+                for hour in sorted(active_hours)
+            ]
+            object_trend_data = [
+                {"time": f"{hour:02d}:00", "count": hourly_counts[hour]}
+                for hour in sorted(active_hours)
+            ]
+            class_distribution = [
+                {"name": name, "count": count, "color": colors[index % len(colors)]}
+                for index, (name, count) in enumerate(
+                    sorted(class_counts.items(), key=lambda item: item[1], reverse=True)
+                )
+            ]
+            return {
+                "mode": "counting",
+                "totalRuns": len(records),
+                "totalObjects": total_objects,
+                "avgObjectsPerRun": round(total_objects / len(records), 1) if records else 0.0,
+                "avgCycleTime": avg_cycle_time,
+                "hourlyCountingData": hourly_counting_data,
+                "objectTrendData": object_trend_data,
+                "classDistribution": class_distribution,
+            }
+
+        # 23082026-KIET-Tính Yield và Pareto chỉ từ record Inspection
+        hourly_defects = {
+            hour: {"ok": 0, "ng": 0}
+            for hour in range(24)
+        }
+        defect_counts = {}
+        for record in records:
+            local_hour = (
+                (record.created_at.hour + 7) % 24
+                if record.created_at
+                else None
+            )
+            for obj in record.objects:
+                if local_hour is not None:
+                    result_key = "ng" if obj.is_ng else "ok"
+                    hourly_defects[local_hour][result_key] += 1
+                for anomaly in obj.anomalies:
+                    defect_name = anomaly.defect_class or "Unknown"
+                    defect_counts[defect_name] = defect_counts.get(defect_name, 0) + 1
+
+        active_hours = visible_hours | {
+            hour
+            for hour, counts in hourly_defects.items()
+            if counts["ok"] + counts["ng"] > 0
+        }
+        hourly_output_data = []
+        yield_trend_data = []
+        for hour in sorted(active_hours):
+            ok_count = hourly_defects[hour]["ok"]
+            ng_count = hourly_defects[hour]["ng"]
+            total = ok_count + ng_count
+            hourly_output_data.append({
+                "hour": f"{hour:02d}h",
+                "ok": ok_count,
+                "ng": ng_count,
+            })
+            yield_trend_data.append({
+                "time": f"{hour:02d}:00",
+                "rate": round(ok_count / total * 100, 1) if total else 0.0,
+            })
+
+        total_ok = sum(counts["ok"] for counts in hourly_defects.values())
+        total_ng = sum(counts["ng"] for counts in hourly_defects.values())
+        total_inspected = total_ok + total_ng
+        pareto = [
+            {"name": name, "count": count, "color": colors[index % len(colors)]}
+            for index, (name, count) in enumerate(
+                sorted(defect_counts.items(), key=lambda item: item[1], reverse=True)
+            )
+        ]
+        return {
+            "mode": "defect",
+            "totalInspected": total_inspected,
+            "overallYield": round(total_ok / total_inspected * 100, 1) if total_inspected else 100.0,
+            "totalNg": total_ng,
+            "avgCycleTime": avg_cycle_time,
+            "hourlyOutputData": hourly_output_data,
+            "yieldTrendData": yield_trend_data,
+            "pareto": pareto,
+        }
+    finally:
+        db.close()
+
+
+@app.get("/analytics/export")
+async def export_analytics(
+    date: str = None,
+    mode: Literal["counting", "defect"] = "defect",
+):
+    """23082026-KIET-Xuất Excel gồm sheet Summary và Raw Data theo Analytics mode."""
+
+    import io
+    from datetime import timedelta
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    summary = await get_analytics(date=date, mode=mode)
+    db = SessionLocal()
+    try:
+        records = _query_analytics_records(db, date, mode)
+        workbook = Workbook()
+        summary_sheet = workbook.active
+        summary_sheet.title = "Summary"
+        raw_sheet = workbook.create_sheet("Raw Data")
+        header_fill = PatternFill("solid", fgColor="2563EB")
+        header_font = Font(color="FFFFFF", bold=True)
+
+        # 23082026-KIET-Ghi summary và chart source hiện tại vào sheet đầu tiên
+        summary_sheet.append(["Vision Analytics", mode.title()])
+        summary_sheet.append(["Date", date or "Today"])
+        if mode == "counting":
+            summary_sheet.append(["Detection Runs", summary["totalRuns"]])
+            summary_sheet.append(["Total Objects", summary["totalObjects"]])
+            summary_sheet.append(["Average Objects / Run", summary["avgObjectsPerRun"]])
+            summary_sheet.append(["Average Cycle Time (s)", summary["avgCycleTime"]])
+            summary_sheet.append([])
+            summary_sheet.append(["Hour", "Object Count"])
+            for row in summary["hourlyCountingData"]:
+                summary_sheet.append([row["hour"], row["count"]])
+            summary_sheet.append([])
+            summary_sheet.append(["Class", "Count"])
+            for item in summary["classDistribution"]:
+                summary_sheet.append([item["name"], item["count"]])
+        else:
+            summary_sheet.append(["Total Inspected", summary["totalInspected"]])
+            summary_sheet.append(["Overall Yield (%)", summary["overallYield"]])
+            summary_sheet.append(["Total NG", summary["totalNg"]])
+            summary_sheet.append(["Average Cycle Time (s)", summary["avgCycleTime"]])
+            summary_sheet.append([])
+            summary_sheet.append(["Hour", "OK", "NG"])
+            for row in summary["hourlyOutputData"]:
+                summary_sheet.append([row["hour"], row["ok"], row["ng"]])
+            summary_sheet.append([])
+            summary_sheet.append(["Defect Type", "Count"])
+            for item in summary["pareto"]:
+                summary_sheet.append([item["name"], item["count"]])
+
+        # 23082026-KIET-Ghi từng object Detection thật vào Raw Data của Counting mode
+        if mode == "counting":
+            raw_headers = [
+                "Record ID", "Record Timestamp", "Created At (UTC+7)", "Camera ID", "Image Path",
+                "Object Index", "Class ID", "Class Name", "Confidence",
+                "Bounding Box", "Objects In Record", "Latency (ms)",
+            ]
+            raw_sheet.append(raw_headers)
+            for record in records:
+                local_timestamp = (
+                    record.created_at + timedelta(hours=7)
+                    if record.created_at
+                    else None
+                )
+                objects = record.objects or [None]
+                for obj in objects:
+                    raw_sheet.append([
+                        record.id,
+                        record.timestamp or "",
+                        local_timestamp.strftime("%Y-%m-%d %H:%M:%S") if local_timestamp else "",
+                        record.camera_id or "",
+                        record.original_image or "",
+                        obj.object_index if obj else "",
+                        obj.class_id if obj else "",
+                        (obj.class_name or "unknown") if obj else "",
+                        float(obj.score or 0) if obj else "",
+                        (obj.bbox or "") if obj else "",
+                        int(record.total_objects or len(record.objects)),
+                        float(record.latency_ms or 0),
+                    ])
+        else:
+            # 23082026-KIET-Ghi từng object và anomaly thật vào Raw Data của Defect mode
+            raw_headers = [
+                "Record ID", "Record Timestamp", "Created At (UTC+7)", "Camera ID", "Image Path",
+                "Object Index", "Result", "Object Score", "Object BBox",
+                "Overlap Ratio", "Crop Image", "Defect Class", "Similarity",
+                "Defect BBox Full", "Defect BBox Crop", "Latency (ms)",
+            ]
+            raw_sheet.append(raw_headers)
+            for record in records:
+                local_timestamp = (
+                    record.created_at + timedelta(hours=7)
+                    if record.created_at
+                    else None
+                )
+                objects = record.objects or [None]
+                for obj in objects:
+                    anomalies = (obj.anomalies or [None]) if obj else [None]
+                    for anomaly in anomalies:
+                        raw_sheet.append([
+                            record.id,
+                            record.timestamp or "",
+                            local_timestamp.strftime("%Y-%m-%d %H:%M:%S") if local_timestamp else "",
+                            record.camera_id or "",
+                            record.original_image or "",
+                            obj.object_index if obj else "",
+                            ("NG" if obj.is_ng else "OK") if obj else ("NG" if record.ng_detected else "OK"),
+                            float(obj.score or 0) if obj else "",
+                            (obj.bbox or "") if obj else "",
+                            float(obj.overlap_ratio or 0) if obj else "",
+                            (obj.crop_image or "") if obj else "",
+                            anomaly.defect_class if anomaly else "",
+                            float(anomaly.similarity or 0) if anomaly else "",
+                            anomaly.bbox_full if anomaly else "",
+                            anomaly.bbox_in_object_crop if anomaly else "",
+                            float(record.latency_ms or 0),
+                        ])
+
+        for sheet in (summary_sheet, raw_sheet):
+            sheet.freeze_panes = "A2"
+            for cell in sheet[1]:
+                cell.fill = header_fill
+                cell.font = header_font
+            for column_cells in sheet.columns:
+                max_length = min(
+                    max(len(str(cell.value or "")) for cell in column_cells) + 2,
+                    60,
+                )
+                sheet.column_dimensions[get_column_letter(column_cells[0].column)].width = max_length
+
+        output = io.BytesIO()
+        workbook.save(output)
+        output.seek(0)
+        export_date = date or "today"
+        filename = f"vision_analytics_{mode}_{export_date}.xlsx"
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Access-Control-Expose-Headers": "Content-Disposition",
+            },
+        )
+    finally:
+        db.close()
+
 
 @app.get("/api/analytics")
-def get_analytics():
+def get_legacy_analytics():
     from services.database.models import QCProductPhotoLibrary, InspectionRecord, BoltObject
     from sqlalchemy import func
     import dateutil.parser
@@ -1514,6 +1890,104 @@ from fastapi import Response
 
 CLOUD_API_BASE = "http://localhost:8031" # Default defect classification server port for testing
 
+
+# 23082026-KIET-Chuyển camera config Edge thành payload Camera Hub dùng chung
+def _camera_sync_payload(camera: dict) -> dict:
+    return {
+        "camera_id": camera["camera_id"],
+        "name": camera["name"],
+        "source_type": camera["source_type"],
+        "source_url": camera.get("source_url"),
+        "serial_number": camera.get("serial_number"),
+        "assigned_task": camera.get("assigned_task"),
+        "enabled": camera.get("enabled", False),
+        "width": camera.get("width"),
+        "height": camera.get("height"),
+        "fps": camera.get("fps"),
+        "created_at": camera.get("created_at"),
+        "updated_at": camera.get("updated_at"),
+        "base_revision": int(camera.get("cloud_revision", 0)),
+    }
+
+
+# 23082026-KIET-Push các camera config mới hoặc vừa thay đổi từ Edge lên Camera Hub
+def _push_dirty_camera_configs() -> dict:
+    dirty_cameras = list_camera_configs(dirty_only=True)
+    if not dirty_cameras:
+        return {"pushed_count": 0, "acknowledged_count": 0}
+
+    edge_node_id = cfg.EDGE_CODE or "EDGE_001"
+    response = requests.post(
+        f"{CLOUD_API_BASE}/api/cameras/sync-up",
+        json={
+            "edge_node_id": edge_node_id,
+            "cameras": [_camera_sync_payload(camera) for camera in dirty_cameras],
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    response_data = response.json()
+    acknowledged_count = acknowledge_camera_configs(
+        response_data.get("cameras", [])
+    )
+    return {
+        "pushed_count": response_data.get("synced_count", 0),
+        "acknowledged_count": acknowledged_count,
+    }
+
+
+# 23082026-KIET-Pull camera config theo Edge ID và cập nhật camera runtime khi cần
+def _pull_camera_configs_from_hub() -> dict:
+    edge_node_id = cfg.EDGE_CODE or "EDGE_001"
+    response = requests.get(
+        f"{CLOUD_API_BASE}/api/cameras/sync-down/{edge_node_id}",
+        timeout=10,
+    )
+    response.raise_for_status()
+    response_data = response.json()
+    applied_cameras = apply_cloud_camera_configs(
+        response_data.get("cameras", [])
+    )
+
+    runtime_errors = []
+    for camera in applied_cameras:
+        try:
+            inference_engine.register_camera_config(camera)
+            if camera.get("enabled", False):
+                inference_engine.connect_camera(camera["camera_id"])
+            else:
+                inference_engine.disconnect_camera(camera["camera_id"])
+        except Exception as exc:
+            runtime_errors.append({
+                "camera_id": camera["camera_id"],
+                "message": str(exc),
+            })
+
+    return {
+        "pulled_count": len(applied_cameras),
+        "runtime_errors": runtime_errors,
+    }
+
+
+@app.post("/api/sync/cameras")
+async def sync_camera_configs_with_hub():
+    """23082026-KIET-Push camera mới lên Hub trước rồi pull config đúng Edge về local."""
+
+    try:
+        push_result = _push_dirty_camera_configs()
+        pull_result = _pull_camera_configs_from_hub()
+        return {
+            "status": "success",
+            "edge_node_id": cfg.EDGE_CODE or "EDGE_001",
+            **push_result,
+            **pull_result,
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Camera Hub sync failed: {exc}",
+        ) from exc
+
 @app.post("/api/sync/dataset-up")
 async def sync_dataset_up():
     from services.database.models import InspectionRecord, SyncState
@@ -1619,17 +2093,29 @@ async def sync_models_down():
                     format=cm["format"],
                     version=cm["version"],
                     map_acc=cm["map_acc"],
-                    status="STANDBY", # Downloaded but not activated
+                    # 22822026-KIET-GET STATUS FROM Cloud 
+                    # status="STANDBY", # Downloaded but not activated
+                    status=cm["status"] or "STANDBY", 
                     file_path=f"cloud_downloads/{cm['name']}",
                     speed_ms=cm["speed_ms"]
                 )
                 db.add(new_m)
                 synced_count += 1
-            elif local_m.version != cm["version"]:
-                # Update existing model metadata
+            elif any([
+                local_m.name != cm["name"],
+                local_m.type != cm["type"],
+                local_m.format != cm["format"],
+                local_m.version != cm["version"],
+                local_m.map_acc != cm.get("map_acc"),
+                local_m.speed_ms != cm.get("speed_ms"),
+            ]):
+                # 22082026 - KIET - Cập nhật speed_ms dù Model Hub không đổi version.
+                local_m.name = cm["name"]
+                local_m.type = cm["type"]
+                local_m.format = cm["format"]
                 local_m.version = cm["version"]
-                local_m.map_acc = cm["map_acc"]
-                local_m.speed_ms = cm["speed_ms"]
+                local_m.map_acc = cm.get("map_acc")
+                local_m.speed_ms = cm.get("speed_ms")
                 synced_count += 1
                 
         db.commit()
