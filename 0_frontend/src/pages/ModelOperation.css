@@ -475,6 +475,9 @@ td {
 
 .sync-popup .btn-primary {
   min-width: 96px;
-  margin-top: 8px;
+  /* 23082026-KIET-Căn giữa vị trí nút và nội dung OK trong popup Model Hub */
+  margin: 8px auto 0;
+  align-self: center;
+  justify-content: center;
 }
 

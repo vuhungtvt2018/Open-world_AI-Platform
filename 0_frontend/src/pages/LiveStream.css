@@ -601,9 +601,12 @@
   font-size: 13px;
 }
 
+/* 23082026-KIET-Căn giữa vị trí nút và nội dung OK trong popup Camera Sync */
 .camera-sync-popup .btn-primary {
   min-width: 96px;
-  margin-top: 8px;
+  margin: 8px auto 0;
+  align-self: center;
+  justify-content: center;
 }
 
 @keyframes camera-sync-modal-scale {
