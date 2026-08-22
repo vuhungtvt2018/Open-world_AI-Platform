@@ -6,11 +6,14 @@ from datetime import datetime
 import cv2
 import numpy as np
 
-from packages.ai.tasks.yolo_detector import YOLODetector
+"""
+22082026 - KHAI - Fix package import
+"""
+from packages.ai.tasks.detection import YOLODetector
 
 # project modules
 from packages.core.config import AppConfig
-from packages.camera.camera import RTSP_Threaded_Camera
+from packages.camera.cctv import RTSP_Threaded_Camera
 from packages.utils.utils import ensure_dirs, ts, pad_and_clip_box
 from packages.utils.session import make_session_dir
 
