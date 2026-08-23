@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from packages.core.config import AppConfig
 from services.database.session import init_db, SessionLocal
 from services.database.crud import create_inspection_record
+from services.camera_service.core import camera_manager
 from packages.utils.cleaner import run_cleaner_daemon
 
 app = FastAPI(title="Visual Inspection AI")
@@ -64,6 +65,10 @@ def seed_models():
 @app.on_event("startup")
 def start_background_tasks():
     init_db()
+    """
+    23082026 - KHAI - Restore enabled camera
+    """
+    camera_manager.load_saved_camera_configs()
     seed_models()
     run_cleaner_daemon(
         captures_dir=cfg.CAPTURE_DIR,
