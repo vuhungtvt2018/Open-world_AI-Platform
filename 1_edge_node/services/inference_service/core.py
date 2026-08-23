@@ -141,8 +141,18 @@ class WebInference:
                 mask_path = os.path.join(self.pipeline.dir_masks, mask_name)
                 cv2.imwrite(mask_path, crop_mask)
 
+                """
+                23082026 - KHAI - Make crops and corresponding masks more concentrated 
+                """
+                # Process crops
+                y_indices, x_indices = np.where(crop_mask > 0)
+                tight_y1, tight_y2 = int(y_indices.min()), int(y_indices.max() + 1)
+                tight_x1, tight_x2 = int(x_indices.min()), int(x_indices.max() + 1)
+                crop_pre = crop[tight_y1:tight_y2, tight_x1:tight_x2]
+                crop_mask_pre = crop_mask[tight_y1:tight_y2, tight_x1:tight_x2]
+
                 # Anomaly Detection
-                out = self.pipeline.anomaly.run(crop, crop_mask)
+                out = self.pipeline.anomaly.run(crop_pre, crop_mask_pre)
                 is_ng = bool(getattr(out, "is_ng", False))
                 
                 # Visualization tiles
@@ -153,16 +163,14 @@ class WebInference:
                     19082026 - KHAI - Hide objects not in the main focus in heatmap tile for visualization
                     """
                     hm_h, hm_w = hm_tile.shape[:2]        
-                    mask_resized = cv2.resize((crop_mask > 0).astype(np.uint8), (hm_w, hm_h), interpolation=cv2.INTER_NEAREST)
+                    mask_resized = cv2.resize((crop_mask_pre > 0).astype(np.uint8), (hm_w, hm_h), interpolation=cv2.INTER_NEAREST)
                     mask_3ch = mask_resized[:, :, None]
                     hm_tile = hm_tile * mask_3ch
                     label_small = f"obj{i} {'NG' if is_ng else 'OK'}"
                     color = (0, 0, 255) if is_ng else (0, 200, 0)
                     cv2.putText(hm_tile, label_small, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
 
-                anomalies_full = []
-                cls_labels_i = []
-                
+                anomalies_full = []                
                 if is_ng:
                     ng_any = True
                     # Lưu heatmap cho NG
@@ -176,7 +184,7 @@ class WebInference:
                         """
                         16082026 - KHAI - Convert bbox in crop to bbox in original
                         """
-                        bbox_in_crop = [int(cx1), int(cy1), int(cx2), int(cy2)]
+                        bbox_in_crop = [cx1 + tight_x1, cy1 + tight_y1, cx2 + tight_x1, cy2 + tight_y1]
                         crop_origin = (crop_x1, crop_y1)
                         bbox_in_original = transform_bbox_to_original_coords(
                             bbox_in_crop,
@@ -190,7 +198,7 @@ class WebInference:
                             "bbox_in_object_crop": bbox_in_crop,
                             "bbox_in_original": bbox_in_original,
                         })
-                        anom_crop = crop[cy1:cy2, cx1:cx2]
+                        anom_crop = crop_pre[cy1:cy2, cx1:cx2]
                         if anom_crop.size != 0:
                             anom_name = f"ANOM_{name}_obj{i}_{ak}.jpg"
                             anom_path = os.path.join(self.pipeline.dir_anom_crops, anom_name)
@@ -203,7 +211,6 @@ class WebInference:
                                 sim = float(cls_res.get("similarity", 0.0))
                                 anomalies_full[-1]["cls_label"] = label
                                 anomalies_full[-1]["cls_similarity"] = sim
-                                cls_labels_i.append(label)
                             else:
                                 anomalies_full[-1]["cls_label"] = "NG"
                                 anomalies_full[-1]["cls_similarity"] = None
@@ -213,31 +220,25 @@ class WebInference:
                 """
                 19082026 - KHAI - Add Vignette mask to crop to focus on main object
                 """
-                y_indices, x_indices = np.where(crop_mask > 0)
-
                 # Blur surrounding of main object
-                if len(y_indices) > 0 and len(x_indices) > 0:
-                    tight_y1, tight_y2 = y_indices.min(), y_indices.max() + 1
-                    tight_x1, tight_x2 = x_indices.min(), x_indices.max() + 1
+                h, w = crop.shape[:2]
+                cx, cy = (tight_x1 + tight_x2) // 2, (tight_y1 + tight_y2) // 2
+                X, Y = np.meshgrid(np.arange(w), np.arange(h))
+                max_radius = np.sqrt(w**2 + h**2) / 2.0
+                dist_from_center = np.sqrt((X - cx)**2 + (Y - cy)**2)
 
-                    h, w = crop.shape[:2]
-                    cx, cy = (tight_x1 + tight_x2) // 2, (tight_y1 + tight_y2) // 2
-                    X, Y = np.meshgrid(np.arange(w), np.arange(h))
-                    max_radius = np.sqrt(w**2 + h**2) / 2.0
-                    dist_from_center = np.sqrt((X - cx)**2 + (Y - cy)**2)
+                # Vignette mask
+                vignette_mask = np.clip(1.0 - (dist_from_center / max_radius) * 0.90, 0.10, 1.0)
+                vignette_mask_3ch = np.dstack([vignette_mask] * 3)
 
-                    # Vignette mask
-                    vignette_mask = np.clip(1.0 - (dist_from_center / max_radius) * 0.90, 0.10, 1.0)
-                    vignette_mask_3ch = np.dstack([vignette_mask] * 3)
+                # Dim background area
+                vignetted_crop = (crop.astype(np.float32) * vignette_mask_3ch * 0.5).astype(np.uint8)
 
-                    # Dim background area
-                    vignetted_crop = (crop.astype(np.float32) * vignette_mask_3ch * 0.5).astype(np.uint8)
-
-                    # Segmentation mask blending
-                    binary_mask = (crop_mask > 0).astype(np.float32)
-                    feathered_mask = cv2.GaussianBlur(binary_mask, (15, 15), 0)[:, :, None]
-                    crop_labeled = (crop.astype(np.float32) * feathered_mask + 
-                                    vignetted_crop.astype(np.float32) * (1.0 - feathered_mask)).astype(np.uint8)
+                # Segmentation mask blending
+                binary_mask = (crop_mask > 0).astype(np.float32)
+                feathered_mask = cv2.GaussianBlur(binary_mask, (15, 15), 0)[:, :, None]
+                crop_labeled = (crop.astype(np.float32) * feathered_mask + 
+                                vignetted_crop.astype(np.float32) * (1.0 - feathered_mask)).astype(np.uint8)
                 
                 if is_ng and len(anomalies_full) > 0:
                     for idx_disp, a in enumerate(anomalies_full, start=1):
