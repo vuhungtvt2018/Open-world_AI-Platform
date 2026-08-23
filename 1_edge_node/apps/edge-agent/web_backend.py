@@ -84,6 +84,15 @@ def start_background_tasks():
     default_event_bus.subscribe(EventBus.EVENT_INFERENCE_DONE, save_db_callback)
 
 
+"""
+23082026 - KHAI - Free camera when shutting down web backend.
+"""
+@app.on_event("shutdown")
+def shutdown_web_backend() -> None:
+    for camera_id in list(camera_manager.cameras.keys()):
+        camera_manager.disconnect_camera(camera_id)
+
+
 app.mount("/captures", StaticFiles(directory=cfg.CAPTURE_DIR), name="captures")
 
 SYNC_DEFECT_IMAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../sync_defect_image"))
