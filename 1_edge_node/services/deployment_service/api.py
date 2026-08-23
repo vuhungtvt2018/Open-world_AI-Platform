@@ -4,14 +4,21 @@ import re
 import sys
 import requests
 import psutil
+from collections import Counter
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Response, HTTPException
 from fastapi.responses import StreamingResponse
 from services.database.session import SessionLocal
 from services.database.models import AIModel, InspectionRecord, SyncState
 from packages.core.config import AppConfig
+from services.database.crud import (
+    acknowledge_camera_configs,
+    list_camera_configs,
+    apply_cloud_camera_configs,
+)
+from services.camera_service.core import camera_manager
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[2]
@@ -23,38 +30,169 @@ router = APIRouter(tags=["System & Deployment"])
 CLOUD_API_BASE = "http://127.0.0.1:8031"
 
 
+"""
+23082026 - KHAI - Add functions related to camera registry
+"""
+# ── Camera Registry ─────────────────────────────────────────────────────────────
+
+# 23082026-KIET-Chuyển camera config Edge thành payload Camera Hub dùng chung
+def _camera_sync_payload(camera: dict) -> dict:
+    return {
+        "camera_id": camera["camera_id"],
+        "name": camera["name"],
+        "source_type": camera["source_type"],
+        "source_url": camera.get("source_url"),
+        "serial_number": camera.get("serial_number"),
+        "assigned_task": camera.get("assigned_task"),
+        "enabled": camera.get("enabled", False),
+        "width": camera.get("width"),
+        "height": camera.get("height"),
+        "fps": camera.get("fps"),
+        "created_at": camera.get("created_at"),
+        "updated_at": camera.get("updated_at"),
+        "base_revision": int(camera.get("cloud_revision", 0)),
+    }
+
+
+# 23082026-KIET-Push các camera config mới hoặc vừa thay đổi từ Edge lên Camera Hub
+def _push_dirty_camera_configs() -> dict:
+    dirty_cameras = list_camera_configs(dirty_only=True)
+    if not dirty_cameras:
+        return {"pushed_count": 0, "acknowledged_count": 0}
+
+    edge_node_id = cfg.EDGE_CODE or "EDGE_001"
+    response = requests.post(
+        f"{CLOUD_API_BASE}/api/cameras/sync-up",
+        json={
+            "edge_node_id": edge_node_id,
+            "cameras": [_camera_sync_payload(camera) for camera in dirty_cameras],
+        },
+        timeout=10,
+    )
+    response.raise_for_status()
+    response_data = response.json()
+    acknowledged_count = acknowledge_camera_configs(
+        response_data.get("cameras", [])
+    )
+    return {
+        "pushed_count": response_data.get("synced_count", 0),
+        "acknowledged_count": acknowledged_count,
+    }
+
+
+# 23082026-KIET-Pull camera config theo Edge ID và cập nhật camera runtime khi cần
+def _pull_camera_configs_from_hub() -> dict:
+    edge_node_id = cfg.EDGE_CODE or "EDGE_001"
+    response = requests.get(
+        f"{CLOUD_API_BASE}/api/cameras/sync-down/{edge_node_id}",
+        timeout=10,
+    )
+    response.raise_for_status()
+    response_data = response.json()
+    applied_cameras = apply_cloud_camera_configs(
+        response_data.get("cameras", [])
+    )
+
+    runtime_errors = []
+    for camera in applied_cameras:
+        try:
+            camera_manager.register_camera_config(camera)
+            if camera.get("enabled", False):
+                camera_manager.connect_camera(camera["camera_id"])
+            else:
+                camera_manager.disconnect_camera(camera["camera_id"])
+        except Exception as exc:
+            runtime_errors.append({
+                "camera_id": camera["camera_id"],
+                "message": str(exc),
+            })
+
+    return {
+        "pulled_count": len(applied_cameras),
+        "runtime_errors": runtime_errors,
+    }
+
+
+@router.post("/api/sync/cameras")
+async def sync_camera_configs_with_hub():
+    """23082026-KIET-Push camera mới lên Hub trước rồi pull config đúng Edge về local."""
+
+    try:
+        push_result = _push_dirty_camera_configs()
+        pull_result = _pull_camera_configs_from_hub()
+        return {
+            "status": "success",
+            "edge_node_id": cfg.EDGE_CODE or "EDGE_001",
+            **push_result,
+            **pull_result,
+        }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Camera Hub sync failed: {exc}",
+        ) from exc
+
+
 # ── Dataset Stats ─────────────────────────────────────────────────────────────
 
+"""
+23082026 - KHAI - Modify output of endpoint /dataset-stats
+"""
 @router.get("/dataset-stats")
 async def get_dataset_stats():
+    """
+    12082026 - KIET - Trả danh sách dataset có metadata riêng cho Inspection và Detection.
+    """
+
     db = SessionLocal()
     try:
-        db.commit()
+        db.commit() # Clear cached transaction
         records = db.query(InspectionRecord).order_by(InspectionRecord.id.desc()).all()
         total = len(records)
+        
         images_list = []
-        for r in records[:50]:
-            ts_val = r.timestamp
-            date_str = ts_val
-            if "_" in ts_val:
-                parts = ts_val.split('_')
+        for r in records[:50]: # Lấy 50 ảnh gần nhất
+            ts = r.timestamp
+            date_str = ts
+            if "_" in ts:
+                parts = ts.split('_')
                 if len(parts) >= 2 and len(parts[0]) == 8 and len(parts[1]) == 6:
                     d, t = parts[0], parts[1]
                     date_str = f"{d[6:8]}/{d[4:6]}/{d[0:4]} {t[0:2]}:{t[2:4]}:{t[4:6]}"
+
+            # 12082026 - KIET - Không gắn record Detection thành kết quả OK của Inspection.
+            record_type = (
+                "Detection"
+                if r.task_type == "detection"
+                else ("NG" if r.ng_detected else "OK")
+            )
+            counts_by_class = {}
+            if r.task_type == "detection":
+                counts_by_class = dict(
+                    Counter(
+                        obj.class_name or "unknown"
+                        for obj in r.objects
+                    )
+                )
+                
             images_list.append({
                 "id": r.id,
                 "name": r.original_image.split('/')[-1].split('\\')[-1] if r.original_image else f"IMG_{r.timestamp}.jpg",
                 "status": "labeled",
-                "type": "NG" if r.ng_detected else "OK",
+                "type": record_type,
+                "task_type": r.task_type,
+                "total_objects": r.total_objects,
+                "counts_by_class": counts_by_class,
                 "date": date_str,
                 "product": cfg.PRODUCT_NAME
             })
+            
         return {
             "stats": [
                 {"label": "Total Images", "value": str(total), "color": "#3b82f6"},
-                {"label": "Labeled",      "value": str(total), "color": "#10b981"},
-                {"label": "Synthetic",    "value": "0",        "color": "#8b5cf6"},
-                {"label": "Pending",      "value": "0",        "color": "#f59e0b"},
+                {"label": "Labeled", "value": str(total), "color": "#10b981"},
+                {"label": "Synthetic", "value": "0", "color": "#8b5cf6"},
+                {"label": "Pending", "value": "0", "color": "#f59e0b"}
             ],
             "images": images_list
         }
@@ -67,81 +205,116 @@ async def get_dataset_stats():
 
 # ── Model Registry ────────────────────────────────────────────────────────────
 
+"""
+23082026 - Modify implementation of get_model_registry
+"""
+def _parse_model_speed_ms(speed_value) -> float:
+    """
+    22082026 - KIET - Chuyển metadata speed_ms của từng model thành số millisecond.
+    """
+
+    if speed_value is None:
+        return 0.0
+
+    match = re.search(r"-?\d+(?:\.\d+)?", str(speed_value))
+    if match is None:
+        return 0.0
+
+    return max(0.0, float(match.group(0)))
+
+
 @router.get("/model-registry")
 async def get_model_registry():
+    """
+    22082026 - KIET - Trả model registry kèm latency và resource metrics theo schema ổn định.
+    """
     db = SessionLocal()
     try:
         models = db.query(AIModel).all()
-        model_list = [{
-            "id": m.id, "name": m.name, "type": m.type,
-            "status": "active" if m.status == "PRODUCTION" else m.status.lower(),
-            "mAP": f"{m.map_acc}%" if m.map_acc is not None else "N/A",
-            "speed": m.speed_ms, "format": m.format, "version": m.version
-        } for m in models]
-
-        active_model = (db.query(AIModel)
-                        .filter(AIModel.status == "PRODUCTION")
-                        .order_by(AIModel.version.desc())
-                        .first()) or (models[0] if models else None)
-
-        active_engine_label, active_map = "N/A", 0.0
-        if active_model:
-            status_label = "Stable" if active_model.status == "PRODUCTION" else active_model.status.capitalize()
-            active_engine_label = f"{active_model.version} {status_label}"
-            active_map = float(active_model.map_acc or 0.0)
-
-        recent_latencies = (db.query(InspectionRecord.latency_ms)
-                              .order_by(InspectionRecord.id.desc()).limit(20).all())
-        pipeline_latency = (round(sum(r[0] for r in recent_latencies) / len(recent_latencies), 2)
-                            if recent_latencies else 0.0)
-
-        def parse_speed_ms(value: str) -> float:
-            if not value:
-                return 0.0
-            m = re.search(r"([0-9]+(?:\.[0-9]+)?)", str(value))
-            return float(m.group(1)) if m else 0.0
-
-        type_colors = {
-            "Detection": '#3b82f6', "Alignment": '#10b981', "Segmentation": '#6366f1',
-            "Anomaly": '#f59e0b', "Classification": '#f43f5e', "Keypoints": '#8b5cf6'
-        }
-
-        latencyData = [{"stage": m.type, "time": parse_speed_ms(m.speed_ms),
-                        "color": type_colors.get(m.type, '#94a3b8')}
-                       for m in models if parse_speed_ms(m.speed_ms) > 0]
-        if not latencyData:
-            latencyData = [
-                {"stage": "Detection",      "time": 0, "color": '#3b82f6'},
-                {"stage": "Alignment",      "time": 0, "color": '#10b981'},
-                {"stage": "Segmentation",   "time": 0, "color": '#6366f1'},
-                {"stage": "Anomaly",        "time": 0, "color": '#f59e0b'},
-                {"stage": "Classification", "time": 0, "color": '#f43f5e'},
-            ]
-
-        total_from_models = round(sum(item['time'] for item in latencyData), 2)
-        if pipeline_latency == 0.0 and total_from_models > 0:
-            pipeline_latency = total_from_models
-
+        model_list = []
+        for m in models:
+            model_list.append({
+                "id": m.id,
+                "name": m.name,
+                "type": m.type,
+                "status": "active" if m.status == "PRODUCTION" else m.status.lower(),
+                "mAP": f"{m.map_acc}%" if m.map_acc else "N/A",
+                "speed": m.speed_ms,
+                "format": m.format,
+                "version": m.version
+            })            
+        
+        # Real-time hardware metrics for resourceData
         cpu_load = psutil.cpu_percent(interval=0.1)
-        vram_usage = min(100.0, cpu_load * 1.2 + (np.random.random() * 5.0))
+        vram_usage = min(100.0, cpu_load * 1.2 + (np.random.random() * 5.0)) # Simulated VRAM
         npu_load = min(100.0, 40.0 + (np.random.random() * 40.0))
+        
+        resourceData = [
+            { "name": 'GPU Memory', "value": round(vram_usage, 1), "color": '#2563eb' },
+            { "name": 'Free', "value": round(100 - vram_usage, 1), "color": '#e2e8f0' },
+        ]
+        
+        # 22082026 - KIET - Dựng latency chart từ speed_ms của model hiện có sau khi sync.
+        latency_colors = [
+            "#3b82f6",
+            "#10b981",
+            "#6366f1",
+            "#f59e0b",
+            "#f43f5e",
+            "#8b5cf6",
+        ]
+        latencyData = [
+            {
+                "stage": f"{model.type} ({model.id})",
+                "time": _parse_model_speed_ms(model.speed_ms),
+                "color": latency_colors[index % len(latency_colors)],
+                "modelId": model.id,
+                "modelName": model.name,
+                "modelType": model.type,
+            }
+            for index, model in enumerate(models)
+        ]
+        pipeline_latency = round(
+            sum(item["time"] for item in latencyData),
+            2,
+        )
+
+        valid_map_values = [
+            float(model.map_acc)
+            for model in models
+            if model.map_acc is not None
+        ]
+        registry_map = round(
+            sum(valid_map_values) / len(valid_map_values),
+            2,
+        ) if valid_map_values else 0.0
 
         return {
-            "activeEngine": active_engine_label,
+            "activeEngine": "v2.4.1 Stable",
             "pipelineLatency": pipeline_latency,
-            "mAP": round(active_map, 1),
+            "mAP": registry_map,
             "models": model_list,
             "latencyData": latencyData,
-            "resourceData": [
-                {"name": "GPU Memory", "value": round(vram_usage, 1),       "color": '#2563eb'},
-                {"name": "Free",       "value": round(100 - vram_usage, 1), "color": '#e2e8f0'},
-            ],
+            "resourceData": resourceData,
             "cpuThreads": round(cpu_load, 1),
             "npuLoad": round(npu_load, 1)
         }
     except Exception as e:
         print(f"Error fetching models: {e}")
-        return {"models": []}
+        # 22082026 - KIET - Giữ đủ field response khi database hoặc hardware metrics gặp lỗi.
+        return {
+            "activeEngine": "Unavailable",
+            "pipelineLatency": 0,
+            "mAP": 0,
+            "models": [],
+            "latencyData": [],
+            "resourceData": [
+                {"name": "GPU Memory", "value": 0, "color": "#2563eb"},
+                {"name": "Free", "value": 100, "color": "#e2e8f0"},
+            ],
+            "cpuThreads": 0,
+            "npuLoad": 0,
+        }
     finally:
         db.close()
 
