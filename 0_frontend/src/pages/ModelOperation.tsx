@@ -6,7 +6,9 @@ import {
   ArrowUpCircle,
   CheckCircle2,
   Clock,
-  HardDrive
+  HardDrive,
+  Loader2,
+  XCircle
 } from 'lucide-react';
 import {
   BarChart,
@@ -110,28 +112,62 @@ const modelRegistry = [
   },
 ];
 
-const latencyData = [
-  { stage: 'Detection', time: 45, color: '#3b82f6' },
-  { stage: 'Alignment', time: 32, color: '#10b981' },
-  { stage: 'Segmentation', time: 58, color: '#6366f1' },
-  { stage: 'Anomaly', time: 145, color: '#f59e0b' },
-  { stage: 'Classification', time: 22, color: '#f43f5e' },
-];
+interface ModelLatencyItem {
+  stage: string;
+  time: number;
+  color: string;
+  modelId?: string;
+  modelName?: string;
+  modelType?: string;
+}
+
+// 22082026 - KIET - Không dùng latency mock khi Model Registry API chưa có dữ liệu.
+const latencyData: ModelLatencyItem[] = [];
 
 const resourceData = [
   { name: 'GPU Memory', value: 68, color: '#2563eb' },
   { name: 'Free', value: 32, color: '#e2e8f0' },
 ];
 
+interface RegistryStats {
+  activeEngine: string;
+  pipelineLatency: number;
+  mAP: number;
+  models: typeof modelRegistry;
+  latencyData: ModelLatencyItem[];
+  resourceData: Array<{ name: string; value: number; color: string }>;
+  cpuThreads: number;
+  npuLoad: number;
+}
+
 const API_BASE_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000';
+
+// 22082026 - KIET - Chuẩn hóa response Model Registry để biểu đồ luôn nhận đủ dữ liệu.
+const normalizeRegistryStats = (data: Partial<RegistryStats>): RegistryStats => ({
+  activeEngine: data.activeEngine ?? 'v2.4.1 Stable',
+  pipelineLatency: data.pipelineLatency ?? 0,
+  mAP: data.mAP ?? 0,
+  models: data.models ?? modelRegistry,
+  latencyData: data.latencyData?.length ? data.latencyData : latencyData,
+  resourceData: data.resourceData?.length ? data.resourceData : resourceData,
+  cpuThreads: data.cpuThreads ?? 0,
+  npuLoad: data.npuLoad ?? 0,
+});
 
 export default function ModelOperation() {
   const [selectedModel, setSelectedModel] = React.useState<any>(null);
-  const [registryStats, setRegistryStats] = React.useState({
+  // 22082026 - PHUC - Trạng thái popup loading + kết quả khi Sync Model Hub.
+  const [isSyncing, setIsSyncing] = React.useState(false);
+  const [syncResult, setSyncResult] = React.useState<{ ok: boolean; message: string } | null>(null);
+  const [registryStats, setRegistryStats] = React.useState<RegistryStats>({
     activeEngine: "v2.4.1 Stable",
     pipelineLatency: 302,
     mAP: 91.4,
-    models: modelRegistry // Fallback
+    models: modelRegistry,
+    latencyData,
+    resourceData,
+    cpuThreads: 0,
+    npuLoad: 0,
   });
 
   React.useEffect(() => {
@@ -139,8 +175,8 @@ export default function ModelOperation() {
       try {
         const res = await fetch(`${API_BASE_URL}/model-registry`, { cache: 'no-store' });
         if (res.ok) {
-          const data = await res.json();
-          setRegistryStats(data);
+          const data = await res.json() as Partial<RegistryStats>;
+          setRegistryStats(normalizeRegistryStats(data));
         }
       } catch (err) {
         console.error("Failed to fetch model registry stats");
@@ -150,26 +186,37 @@ export default function ModelOperation() {
   }, []);
 
   const handleSync = async () => {
-    try {
-      // 1. Push local models up to Cloud DB first
-      await fetch(`${API_BASE_URL}/api/sync/models-up`, { method: 'POST' });
+    setIsSyncing(true);
+    setSyncResult(null);
 
-      // 2. Pull latest models down from Cloud DB
+    try {
+      // 22082026 - KIET - Pull Model Hub trước để metadata latency mới không bị local ghi đè.
       const res = await fetch(`${API_BASE_URL}/api/sync/models-down`, { method: 'POST' });
-      if (res.ok) {
-        // Refresh models list in UI
-        const modelRes = await fetch(`${API_BASE_URL}/model-registry`, { cache: 'no-store' });
-        if (modelRes.ok) {
-          const data = await modelRes.json();
-          setRegistryStats(data);
-          alert('Sync successful!');
-        }
-      } else {
-        alert('Sync failed!');
+      if (!res.ok) {
+        throw new Error('Failed to pull models from Model Hub');
       }
+
+      // 22082026 - KIET - Push lại registry đã merge và refresh latency theo model.
+      const pushRes = await fetch(`${API_BASE_URL}/api/sync/models-up`, { method: 'POST' });
+      if (!pushRes.ok) {
+        throw new Error('Failed to push merged model registry');
+      }
+
+      const modelRes = await fetch(`${API_BASE_URL}/model-registry`, { cache: 'no-store' });
+      if (modelRes.ok) {
+        const data = await modelRes.json() as Partial<RegistryStats>;
+        setRegistryStats(normalizeRegistryStats(data));
+      }
+
+      setSyncResult({ ok: true, message: 'Model Registry đã được đồng bộ với Model Hub.' });
     } catch (err) {
       console.error(err);
-      alert('Error during sync');
+      setSyncResult({
+        ok: false,
+        message: err instanceof Error ? err.message : 'Error during sync',
+      });
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -279,14 +326,55 @@ export default function ModelOperation() {
         </div>
       )}
 
+      {/* 22082026 - PHUC - Popup loading khi đang sync (chặn tương tác cho tới khi xong). */}
+      {isSyncing && (
+        <div className="modal-overlay">
+          <div className="modal-content glass-panel sync-popup" onClick={(e) => e.stopPropagation()}>
+            <Loader2 size={44} className="text-primary sync-spinner" />
+            <h3>Syncing with Model Hub...</h3>
+            <p className="text-muted">Pulling models và pushing merged registry, vui lòng đợi.</p>
+          </div>
+        </div>
+      )}
+
+      {/* 22082026 - PHUC - Popup kết quả sync thay cho alert(). */}
+      {syncResult && !isSyncing && (
+        <div className="modal-overlay" onClick={() => setSyncResult(null)}>
+          <div
+            className={`modal-content glass-panel sync-popup ${syncResult.ok ? 'success' : 'error'}`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {syncResult.ok ? (
+              <CheckCircle2 size={44} className="text-success" />
+            ) : (
+              <XCircle size={44} className="text-secondary" />
+            )}
+            <h3>{syncResult.ok ? 'Sync Successful' : 'Sync Failed'}</h3>
+            <p className="text-muted">{syncResult.message}</p>
+            <button className="btn-primary" onClick={() => setSyncResult(null)}>
+              OK
+            </button>
+          </div>
+        </div>
+      )}
+
       <header className="page-header">
         <div className="header-info">
           <h1 className="text-primary">Model Operation</h1>
           <p className="text-muted">Model version control, performance tracking and deployment management</p>
         </div>
-        <button className="sync-btn glow-primary" onClick={handleSync}>
-          <RefreshCcw size={18} />
-          Sync with Model Hub
+        <button className="sync-btn glow-primary" onClick={handleSync} disabled={isSyncing}>
+          {isSyncing ? (
+            <>
+              <RefreshCcw size={18} className="sync-spinner" />
+              Syncing...
+            </>
+          ) : (
+            <>
+              <RefreshCcw size={18} />
+              Sync with Model Hub
+            </>
+          )}
         </button>
       </header>
 
@@ -358,11 +446,11 @@ export default function ModelOperation() {
           <section className="op-section chart-panel glass-panel">
             <div className="section-header">
               <Clock size={20} className="text-primary" />
-              <h2>Pipeline Latency Breakdown (ms)</h2>
+              <h2>Model Latency Breakdown (ms)</h2>
             </div>
             <div className="chart-container">
               <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={registryStats.latencyData || latencyData} layout="vertical" margin={{ left: 20 }}>
+                <BarChart data={registryStats.latencyData} layout="vertical" margin={{ left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
                   <XAxis type="number" hide />
                   <YAxis
@@ -371,11 +459,11 @@ export default function ModelOperation() {
                     axisLine={false}
                     tickLine={false}
                     fontSize={12}
-                    width={80}
+                    width={120}
                   />
-                  <Tooltip cursor={{ fill: '#f8fafc' }} />
+                  <Tooltip cursor={{ fill: '#f8fafc' }} formatter={(value) => [`${value} ms`, 'Latency']} />
                   <Bar dataKey="time" radius={[0, 4, 4, 0]} barSize={20}>
-                    {(registryStats.latencyData || latencyData).map((entry: any, index: number) => (
+                    {registryStats.latencyData.map((entry: ModelLatencyItem, index: number) => (
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Bar>
@@ -407,7 +495,7 @@ export default function ModelOperation() {
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="pie-label">
-                  <span className="label-val">{registryStats.resourceData ? registryStats.resourceData[0].value : 68}%</span>
+                  <span className="label-val">{registryStats.resourceData[0]?.value ?? 0}%</span>
                   <span className="label-sub">VRAM</span>
                 </div>
               </div>
@@ -415,16 +503,16 @@ export default function ModelOperation() {
                 <div className="res-item">
                   <div className="res-info">
                     <span>CPU Threads</span>
-                    <span className="res-val">{registryStats.cpuThreads || 42}%</span>
+                    <span className="res-val">{registryStats.cpuThreads}%</span>
                   </div>
-                  <div className="res-bar"><div className="res-fill" style={{ width: `${registryStats.cpuThreads || 42}%`, background: '#3b82f6' }}></div></div>
+                  <div className="res-bar"><div className="res-fill" style={{ width: `${registryStats.cpuThreads}%`, background: '#3b82f6' }}></div></div>
                 </div>
                 <div className="res-item">
                   <div className="res-info">
                     <span>NPU Load</span>
-                    <span className="res-val">{registryStats.npuLoad || 85}%</span>
+                    <span className="res-val">{registryStats.npuLoad}%</span>
                   </div>
-                  <div className="res-bar"><div className="res-fill" style={{ width: `${registryStats.npuLoad || 85}%`, background: '#f59e0b' }}></div></div>
+                  <div className="res-bar"><div className="res-fill" style={{ width: `${registryStats.npuLoad}%`, background: '#f59e0b' }}></div></div>
                 </div>
               </div>
             </div>

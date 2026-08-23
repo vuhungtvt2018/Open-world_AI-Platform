@@ -10,4 +10,5 @@ torchvision
 tqdm
 sqlalchemy
 fastapi
+openpyxl
 pypylon

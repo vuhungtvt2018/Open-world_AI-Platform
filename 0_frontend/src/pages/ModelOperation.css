@@ -433,3 +433,51 @@ td {
   cursor: pointer;
 }
 
+/* 22082026 - PHUC - Popup loading & popup kết quả khi Sync Model Hub */
+.sync-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Ghi đè hover translate khi đang disabled */
+.sync-btn:hover:disabled {
+  transform: none;
+  filter: none;
+}
+
+.sync-spinner {
+  animation: syncSpin 0.9s linear infinite;
+}
+
+@keyframes syncSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.sync-popup {
+  padding: 36px 40px !important; /* đè padding: 0 của .modal-content */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+
+.sync-popup h3 {
+  font-size: 18px;
+}
+
+.sync-popup p {
+  font-size: 13px;
+  max-width: 320px;
+}
+
+.sync-popup .btn-primary {
+  min-width: 96px;
+  /* 23082026-KIET-Căn giữa vị trí nút và nội dung OK trong popup Model Hub */
+  margin: 8px auto 0;
+  align-self: center;
+  justify-content: center;
+}
+

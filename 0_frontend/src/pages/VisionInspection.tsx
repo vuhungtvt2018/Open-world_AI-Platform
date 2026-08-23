@@ -146,9 +146,14 @@ export default function VisionInspection() {
         throw new Error(data.detail || 'Failed to fetch images');
       }
 
-      setAvailableImages(data.images || []);
-      if (data.images?.length > 0) {
-        setSelectedImage((currentImage) => currentImage || data.images[0]);
+      // chỉ nhận ảnh in-memory trong phiên đang mở, reload trang thì list để trống.
+      const persistedImages: string[] = (data.images || []).filter(
+        (name: string) => !name.startsWith('in_memory_image'),
+      );
+
+      setAvailableImages(persistedImages);
+      if (persistedImages.length > 0) {
+        setSelectedImage((currentImage) => currentImage || persistedImages[0]);
       }
     } catch (error) {
       console.error('Failed to fetch images:', error);
@@ -295,13 +300,17 @@ export default function VisionInspection() {
   );
 
   // 19082026 - KIET - Chỉ mở MJPEG stream khi camera config đang online hoặc connecting.
-  const inputImage = inputMode === 'camera'
-    && selectedCameraId
-    && ['online', 'connecting'].includes(selectedConfiguredCamera?.status || '')
-    ? `${API_BASE_URL}/video-feed?cam=${encodeURIComponent(selectedCameraId)}&fps=15`
-    : selectedImage
-      ? `${API_BASE_URL}/images/${selectedImage}`
-      : null;
+  // 22082026 - PHUC - Camera mode mà camera offline thì hiển thị placeholder,
+  // không fallback sang ảnh folder để tránh nhầm ảnh cũ là feed camera.
+  const inputImage =
+    inputMode === 'camera'
+      ? selectedCameraId
+        && ['online', 'connecting'].includes(selectedConfiguredCamera?.status || '')
+        ? `${API_BASE_URL}/video-feed?cam=${encodeURIComponent(selectedCameraId)}&fps=15`
+        : null
+      : selectedImage
+        ? `${API_BASE_URL}/images/${selectedImage}`
+        : null;
 
   return (
     <div className="inspection-container">
@@ -378,9 +387,10 @@ export default function VisionInspection() {
           <div className={`quad-viewer ${taskMode === 'detection' ? 'detection-mode' : ''}`}>
             <div className="view-panel glass-panel">
               <div className="view-header">
-                <span className="text-xs font-bold uppercase tracking-wider text-muted">
-                  1. Input Source
-                </span>
+                <div className="view-header-title">
+                  <span className="view-step-badge">1</span>
+                  <span className="view-header-label">Input Source</span>
+                </div>
                 {inputImage && (
                   <button
                     className="view-expand-btn"
@@ -422,9 +432,10 @@ export default function VisionInspection() {
               <>
                 <div className="view-panel glass-panel">
                   <div className="view-header">
-                    <span className="text-xs font-bold uppercase tracking-wider text-muted">
-                      2. Detection Result
-                    </span>
+                    <div className="view-header-title">
+                      <span className="view-step-badge">2</span>
+                      <span className="view-header-label">Detection Result</span>
+                    </div>
                     {latestResult?.original_image_url && (
                       <button
                         className="view-expand-btn"
@@ -478,9 +489,10 @@ export default function VisionInspection() {
 
                 <div className="view-panel glass-panel counting-summary-panel">
                   <div className="view-header">
-                    <span className="text-xs font-bold uppercase tracking-wider text-muted">
-                      3. Class Counting Summary
-                    </span>
+                    <div className="view-header-title">
+                      <span className="view-step-badge">3</span>
+                      <span className="view-header-label">Class Counting Summary</span>
+                    </div>
                   </div>
                   <div className="counting-summary-body">
                     <div className="total-objects-box">
@@ -517,9 +529,10 @@ export default function VisionInspection() {
               <>
                 <div className="view-panel glass-panel">
                   <div className="view-header">
-                    <span className="text-xs font-bold uppercase tracking-wider text-muted">
-                      2. Object Heatmaps
-                    </span>
+                    <div className="view-header-title">
+                      <span className="view-step-badge">2</span>
+                      <span className="view-header-label">Object Heatmaps</span>
+                    </div>
                   </div>
                   <div className="image-display">
                     {latestResult?.vis_urls?.heatmap ? (
@@ -535,9 +548,10 @@ export default function VisionInspection() {
 
                 <div className="view-panel glass-panel">
                   <div className="view-header">
-                    <span className="text-xs font-bold uppercase tracking-wider text-muted">
-                      3. Object Outputs (Crops)
-                    </span>
+                    <div className="view-header-title">
+                      <span className="view-step-badge">3</span>
+                      <span className="view-header-label">Object Outputs (Crops)</span>
+                    </div>
                   </div>
                   <div className="image-display">
                     {latestResult?.vis_urls?.crops ? (
@@ -553,9 +567,10 @@ export default function VisionInspection() {
 
                 <div className="view-panel glass-panel">
                   <div className="view-header">
-                    <span className="text-xs font-bold uppercase tracking-wider text-muted">
-                      4. Overall Result
-                    </span>
+                    <div className="view-header-title">
+                      <span className="view-step-badge">4</span>
+                      <span className="view-header-label">Overall Result</span>
+                    </div>
                     {latestResult && (
                       <span className={`result-tag ${latestResult.ng_detected ? 'ng' : 'ok'}`}>
                         {latestResult.ng_detected ? 'NG DETECTED' : 'QUALITY OK'}

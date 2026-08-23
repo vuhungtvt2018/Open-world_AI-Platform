@@ -36,6 +36,36 @@ class CloudAIModel(Base):
     updated_at: Mapped[str] = mapped_column(DateTime, server_default=func.now(), server_onupdate=sqltext("NOW()"))
 
 
+# 23082026-KIET-Lưu cấu hình camera được đồng bộ từ từng Edge Node lên Cloud
+class CloudCameraConfig(Base):
+    __tablename__ = "cloud_camera_configs"
+
+    edge_node_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    camera_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str] = mapped_column(String(150))
+    source_type: Mapped[str] = mapped_column(String(20), index=True)
+    source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    assigned_task: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    edge_created_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    edge_updated_at: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # 23082026-KIET-Lưu phiên bản Camera Hub để Edge nhận biết config mới hơn
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    # 23082026-KIET-Ghi nhận nguồn cập nhật gần nhất của camera config
+    updated_source: Mapped[str] = mapped_column(String(20), default="edge")
+    # 23082026-KIET-Dành trạng thái xóa mềm để đồng bộ camera về Edge an toàn
+    deleted_at: Mapped[str | None] = mapped_column(DateTime, nullable=True)
+    synced_at: Mapped[str] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class InspectionRecord(Base):
     __tablename__ = "inspection_records"
 

@@ -105,17 +105,26 @@ def camera_config_to_dict(camera: CameraConfig) -> Dict[str, Any]:
         "width": camera.width,
         "height": camera.height,
         "fps": camera.fps,
+        "sync_dirty": camera.sync_dirty,
+        "cloud_revision": camera.cloud_revision,
+        "last_synced_at": str(camera.last_synced_at) if camera.last_synced_at else None,
+        "created_at": str(camera.created_at) if camera.created_at else None,
+        "updated_at": str(camera.updated_at) if camera.updated_at else None,
     }
 
 
-def list_camera_configs() -> List[Dict[str, Any]]:
+def list_camera_configs(dirty_only: bool = False) -> List[Dict[str, Any]]:
     """
     19082026 - KIET - Lấy toàn bộ cấu hình camera đã lưu trên Edge database.
     """
 
     db: Session = SessionLocal()
     try:
-        cameras = db.query(CameraConfig).order_by(CameraConfig.camera_id.asc()).all()
+        query = db.query(CameraConfig)
+        if dirty_only:
+            # 23082026-KIET-Chỉ lấy camera config có thay đổi cục bộ chưa được Hub xác nhận
+            query = query.filter(CameraConfig.sync_dirty.is_(True))
+        cameras = query.order_by(CameraConfig.camera_id.asc()).all()
         return [camera_config_to_dict(camera) for camera in cameras]
     finally:
         db.close()
@@ -134,7 +143,10 @@ def get_camera_config(camera_id: str) -> Dict[str, Any] | None:
         db.close()
 
 
-def upsert_camera_config(camera_data: Dict[str, Any]) -> Dict[str, Any]:
+def upsert_camera_config(
+    camera_data: Dict[str, Any],
+    mark_dirty: bool = True,
+) -> Dict[str, Any]:
     """
     19082026 - KIET - Tạo mới hoặc cập nhật cấu hình RTSP/Basler từ Live Stream UI.
     """
@@ -162,6 +174,12 @@ def upsert_camera_config(camera_data: Dict[str, Any]) -> Dict[str, Any]:
         for field_name in editable_fields:
             if field_name in camera_data:
                 setattr(camera, field_name, camera_data[field_name])
+
+        # 23082026-KIET-Phân biệt thay đổi từ UI Edge và cấu hình vừa pull từ Camera Hub
+        camera.sync_dirty = mark_dirty
+        if not mark_dirty:
+            camera.cloud_revision = int(camera_data.get("revision", camera.cloud_revision or 0))
+            camera.last_synced_at = datetime.now()
 
         db.commit()
         db.refresh(camera)
@@ -199,6 +217,9 @@ def update_camera_config(camera_id: str, changes: Dict[str, Any]) -> Dict[str, A
             if field_name in changes:
                 setattr(camera, field_name, changes[field_name])
 
+        # 23082026-KIET-Đánh dấu thay đổi camera tại Edge để worker hoặc nút Sync đẩy lên Hub
+        camera.sync_dirty = True
+
         db.commit()
         db.refresh(camera)
         return camera_config_to_dict(camera)
@@ -207,3 +228,47 @@ def update_camera_config(camera_id: str, changes: Dict[str, Any]) -> Dict[str, A
         raise
     finally:
         db.close()
+
+
+# 23082026-KIET-Xác nhận các camera config đã được Camera Hub lưu thành công
+def acknowledge_camera_configs(camera_revisions: List[Dict[str, Any]]) -> int:
+    db: Session = SessionLocal()
+    try:
+        acknowledged_count = 0
+        for item in camera_revisions:
+            camera = db.get(CameraConfig, str(item["camera_id"]))
+            if camera is None:
+                continue
+            client_updated_at = item.get("client_updated_at")
+            if client_updated_at and str(camera.updated_at) != str(client_updated_at):
+                # 23082026-KIET-Không xóa dirty nếu camera lại thay đổi trong lúc request đang chạy
+                continue
+            camera.cloud_revision = int(item.get("revision", camera.cloud_revision or 0))
+            camera.sync_dirty = False
+            camera.last_synced_at = datetime.now()
+            acknowledged_count += 1
+        db.commit()
+        return acknowledged_count
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# 23082026-KIET-Upsert camera config từ Hub nhưng không tạo vòng lặp push ngược lại
+def apply_cloud_camera_configs(camera_configs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    applied_configs: List[Dict[str, Any]] = []
+    for camera_data in camera_configs:
+        local_camera = get_camera_config(str(camera_data["camera_id"]))
+        remote_revision = int(camera_data.get("revision", 0))
+        local_revision = int(local_camera.get("cloud_revision", 0)) if local_camera else -1
+        if local_camera is not None and local_camera.get("sync_dirty", False):
+            # 23082026-KIET-Không ghi đè thay đổi local phát sinh giữa bước push và pull
+            continue
+        if local_camera is not None and remote_revision <= local_revision:
+            continue
+        applied_configs.append(
+            upsert_camera_config(camera_data, mark_dirty=False)
+        )
+    return applied_configs
