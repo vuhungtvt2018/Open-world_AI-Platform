@@ -373,9 +373,14 @@ class WebInference:
 
         latency_ms = (time.time() - start_time) * 1000
 
+        """
+        23082026 - KHAI - Add task type and camera ID fields to record to feed to event bus
+        """
         record = {
             "timestamp": name,
             "image": os.path.basename(orig_path),
+            "task_type": "inspection",
+            "camera_id": cam_id,
             "ng_detected": ng_any,
             "latency_ms": round(latency_ms, 2),
             "total_objects": len(per_objects),
@@ -387,9 +392,14 @@ class WebInference:
         # Publish event thay vì gọi DB trực tiếp (Event-driven Architecture)
         default_event_bus.publish(EventBus.EVENT_INFERENCE_DONE, record=record)
 
+        """
+        23082026 - KHAI - Add task type and camera ID fields to final output
+        """
         return {
             "status": "success",
             "timestamp": name,
+            "task_type": "inspection",
+            "camera_id": cam_id,
             "ng_detected": ng_any,
             "metrics": {
                 "latency_ms": round(latency_ms, 2),
