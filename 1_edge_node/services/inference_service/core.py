@@ -99,6 +99,11 @@ class WebInference:
         # 4. Rotation & Anomaly Detection
         ng_any = False
         per_objects = []
+        anomaly_input_scope = getattr(self.pipeline.anomaly, 'input_scope', 'object')
+        full_frame_anomaly_output = None
+        if anomaly_input_scope == 'full_frame':
+            full_frame_anomaly_output = self.pipeline.anomaly.run_full_frame(frame)
+
         if mapping_object:
             for i, obj in enumerate(mapping_object):
                 landmark_1 = obj['keypoints'][1][:2]
@@ -152,7 +157,18 @@ class WebInference:
                 crop_mask_pre = crop_mask[tight_y1:tight_y2, tight_x1:tight_x2]
 
                 # Anomaly Detection
-                out = self.pipeline.anomaly.run(crop_pre, crop_mask_pre)
+                if anomaly_input_scope == 'full_frame':
+                    out = self.pipeline.anomaly.project_to_object(
+                        full_frame_anomaly_output,
+                        crop_pre,
+                        crop_mask_pre,
+                        mask,
+                        M,
+                        (crop_x1, crop_y1),
+                        (tight_x1, tight_y1),
+                    )
+                else:
+                    out = self.pipeline.anomaly.run(crop_pre, crop_mask_pre)
                 is_ng = bool(getattr(out, "is_ng", False))
                 
                 # Visualization tiles

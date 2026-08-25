@@ -43,6 +43,9 @@ class AppConfig(BaseConfig):
     PAD_RATIO: float = 0.1
 
     # ===== Anomalib =====
+    ANOMALY_BACKEND: str = "anomalib"
+
+    # ===== Anomalib =====
     ANOMALY_MODEL_PATH: str = "exported_models/weights/onnx/model.onnx"
     ANOMALY_DEVICE: str = "CPU"
     ANOMALY_INPUT_SIZE: int = 512
@@ -113,6 +116,9 @@ class AppConfig(BaseConfig):
             # Capture / display
             DISPLAY_SCALE=float(raw.get("DISPLAY_SCALE", 0.25)),
             PAD_RATIO=float(raw.get("PAD_RATIO", 0.1)),
+
+            # Anomaly backend
+            ANOMALY_BACKEND=raw.get("ANOMALY_BACKEND", "anomalib"),
 
             # Anomalib
             ANOMALY_MODEL_PATH=raw.get("ANOMALY_MODEL_PATH", "exported_models/weights/onnx/model.onnx"),

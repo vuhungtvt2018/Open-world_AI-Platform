@@ -11,6 +11,7 @@ from packages.utils.utils import pad_and_clip_box
 
 
 class YOLOInferencer(BaseVisionTask):
+    input_scope = 'full_frame'
     """
     Inferencer phát hiện vùng bất thường bằng Ultralytics YOLO.
 
@@ -284,6 +285,128 @@ class YOLOInferencer(BaseVisionTask):
             *args,
             **kwargs,
         )
+
+    def run_full_frame(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], Any]:
+        return self.predict(self.preprocess(image))
+
+    def project_to_object(
+        self, full_frame_output, crop_bgr, obj_mask_crop, obj_mask_full,
+        rotation_matrix, crop_origin, tight_origin,
+    ) -> InferenceResult:
+        frame_bgr, prediction = full_frame_output
+        if (frame_bgr is None or prediction is None or crop_bgr is None
+                or crop_bgr.size == 0):
+            return self._empty_result(crop_bgr, full_frame_output)
+        fh, fw = frame_bgr.shape[:2]
+        ch, cw = crop_bgr.shape[:2]
+        full_mask = self._prepare_object_mask(obj_mask_full, fw, fh)
+        crop_mask = self._prepare_object_mask(obj_mask_crop, cw, ch)
+        anomaly_full, boxes = self._project_detections(
+            prediction, full_mask, rotation_matrix, crop_origin,
+            tight_origin, (ch, cw), (fh, fw),
+        )
+        anomaly_map = self._project_anomaly_map(
+            anomaly_full, rotation_matrix, crop_origin, tight_origin, (ch, cw)
+        )
+        masked = anomaly_map * crop_mask
+        total = int((anomaly_map > 0).sum())
+        inside = int(((anomaly_map > 0).astype(np.uint8) * crop_mask).sum())
+        score = max((box.confidence for box in boxes), default=0.0)
+        return InferenceResult(
+            classification_score=float(score), is_ng=bool(boxes), boxes=boxes,
+            heatmap_display=self._generate_heatmap(crop_bgr, masked),
+            anomaly_map_raw=anomaly_map, anomaly_map_masked=masked,
+            overlap_ratio=float(inside / total if total else 0.0),
+            visualized_image=crop_bgr.copy(), raw_output=full_frame_output,
+        )
+
+    @staticmethod
+    def _project_anomaly_map(
+        anomaly_full, rotation_matrix, crop_origin, tight_origin, crop_shape,
+    ):
+        frame_h, frame_w = anomaly_full.shape[:2]
+        crop_h, crop_w = crop_shape
+        rotated = cv2.warpAffine(
+            anomaly_full, rotation_matrix, (frame_w, frame_h),
+            flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT,
+        )
+        sx = int(crop_origin[0] + tight_origin[0])
+        sy = int(crop_origin[1] + tight_origin[1])
+        result = rotated[sy:sy + crop_h, sx:sx + crop_w]
+        if result.shape == (crop_h, crop_w):
+            return result
+        padded = np.zeros((crop_h, crop_w), dtype=np.float32)
+        h = min(crop_h, result.shape[0])
+        w = min(crop_w, result.shape[1])
+        if h > 0 and w > 0:
+            padded[:h, :w] = result[:h, :w]
+        return padded
+
+    def _project_detections(
+        self, prediction, object_mask, rotation_matrix, crop_origin,
+        tight_origin, crop_shape, frame_shape,
+    ):
+        frame_h, frame_w = frame_shape
+        crop_h, crop_w = crop_shape
+        anomaly_map = np.zeros((frame_h, frame_w), dtype=np.float32)
+        boxes = []
+        if prediction.boxes is None:
+            return anomaly_map, boxes
+        for index in range(len(prediction.boxes)):
+            item = prediction.boxes[index]
+            confidence = float(item.conf.item())
+            class_id = int(item.cls.item())
+            raw_box = item.xyxy[0].detach().cpu().numpy().astype(np.float32)
+            x1, y1, x2, y2 = self._clip_box(raw_box, frame_w, frame_h)
+            region = self._get_region_mask(
+                prediction.masks, index, (x1, y1, x2, y2), frame_w, frame_h
+            )
+            area = int(region.sum())
+            inside = int((region * object_mask).sum())
+            min_area = max(1, int(round(self.min_area_ratio * object_mask.sum())))
+            overlap = inside / area if area else 0.0
+            if (area < min_area or inside == 0
+                    or overlap < self.inside_overlap_min):
+                continue
+            anomaly_map = np.maximum(
+                anomaly_map, region.astype(np.float32) * confidence
+            )
+            projected = self._project_box(
+                (x1, y1, x2, y2), rotation_matrix,
+                crop_origin, tight_origin, crop_w, crop_h,
+            )
+            if projected is None:
+                continue
+            px1, py1, px2, py2 = projected
+            boxes.append(BoundingBox(
+                xmin=px1, ymin=py1, xmax=px2, ymax=py2,
+                confidence=confidence, class_id=class_id,
+                class_name=self._get_class_name(prediction.names, class_id),
+            ))
+        return anomaly_map, boxes
+
+    def _project_box(
+        self, bbox, rotation_matrix, crop_origin, tight_origin, width, height,
+    ):
+        x1, y1, x2, y2 = bbox
+        points = np.array(
+            [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], dtype=np.float32
+        ).reshape(-1, 1, 2)
+        points = cv2.transform(points, rotation_matrix).reshape(-1, 2)
+        offset_x = float(crop_origin[0] + tight_origin[0])
+        offset_y = float(crop_origin[1] + tight_origin[1])
+        raw = np.array([
+            points[:, 0].min() - offset_x,
+            points[:, 1].min() - offset_y,
+            points[:, 0].max() - offset_x,
+            points[:, 1].max() - offset_y,
+        ], dtype=np.float32)
+        x1, y1, x2, y2 = self._clip_box(raw, width, height)
+        if x2 <= x1 or y2 <= y1:
+            return None
+        return tuple(float(v) for v in pad_and_clip_box(
+            x1, y1, x2, y2, self.bbox_pad_ratio, width, height
+        ))
 
     @staticmethod
     def _prepare_object_mask(
