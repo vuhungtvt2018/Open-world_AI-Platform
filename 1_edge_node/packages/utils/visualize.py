@@ -32,20 +32,29 @@ def concat_anomaly_crops(anomaly_crop_views: List[np.ndarray], target_h: int = 3
         cols = math.ceil(math.sqrt(num_views))
         rows = math.ceil(num_views / cols)
 
-    avg_aspect_ratio = sum(img.shape[1] / max(1, img.shape[0]) for img in valid_views) / num_views
-    target_w = max(1, int(target_h * avg_aspect_ratio))
-
-    resized = [cv2.resize(img, (target_w, target_h)) for img in valid_views]
-
-    total_slots = rows * cols
-    if len(resized) < total_slots:
-        pad_count = total_slots - len(resized)
-        blank = np.zeros((target_h, target_w, 3), dtype=np.uint8)
-        resized.extend([blank] * pad_count)
+    resized = []
+    for img in valid_views:
+        src_h, src_w = img.shape[:2]
+        scale = target_h / max(1, src_h)
+        new_w = max(1, int(round(src_w * scale)))
+        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        resized.append(cv2.resize(
+            img, (new_w, target_h), interpolation=interpolation
+        ))
 
     grid_rows = []
     for r in range(rows):
         row_imgs = resized[r * cols : (r + 1) * cols]
-        grid_rows.append(cv2.hconcat(row_imgs))
+        if row_imgs:
+            grid_rows.append(cv2.hconcat(row_imgs))
+
+    max_row_w = max(row.shape[1] for row in grid_rows)
+    for index, row in enumerate(grid_rows):
+        pad_right = max_row_w - row.shape[1]
+        if pad_right > 0:
+            grid_rows[index] = cv2.copyMakeBorder(
+                row, 0, 0, 0, pad_right,
+                cv2.BORDER_CONSTANT, value=(0, 0, 0),
+            )
 
     return cv2.vconcat(grid_rows)

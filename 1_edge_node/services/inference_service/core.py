@@ -25,6 +25,41 @@ class WebInference:
         self.cfg = config
         self.pipeline = Pipeline(config)
 
+    def _clean_mapped_masks(self, mapped, width, height):
+        if not mapped:
+            return mapped
+        seeds = []
+        for item in mapped:
+            p1, p2 = item['keypoints'][0], item['keypoints'][1]
+            seeds.append(((float(p1[0]) + float(p2[0])) / 2.0,
+                          (float(p1[1]) + float(p2[1])) / 2.0))
+        original_masks = [
+            (item['mask'] > 0).astype(np.uint8) for item in mapped
+        ]
+        overlap_count = np.sum(np.stack(original_masks, axis=0), axis=0)
+        shared_pixels = overlap_count > 1
+        for index, item in enumerate(mapped):
+            original = original_masks[index]
+            cleaned = original.copy()
+            ys, xs = np.where((original > 0) & shared_pixels)
+            own_x, own_y = seeds[index]
+            own_distance = (xs - own_x) ** 2 + (ys - own_y) ** 2
+            keep = np.ones(xs.shape, dtype=bool)
+            for other_index, (other_x, other_y) in enumerate(seeds):
+                if other_index == index:
+                    continue
+                other_distance = (xs - other_x) ** 2 + (ys - other_y) ** 2
+                keep &= own_distance <= other_distance
+            cleaned[ys[~keep], xs[~keep]] = 0
+            ys, xs = np.where(cleaned > 0)
+            if xs.size == 0:
+                continue
+            item['mask'] = cleaned
+            item['seg_box'] = [
+                int(xs.min()), int(ys.min()), int(xs.max() + 1), int(ys.max() + 1)
+            ]
+        return mapped
+
     def run_inspect(self, cam_id: str = "default"):
         from services.camera_service.core import camera_manager
         frame = camera_manager.get_frame(cam_id)
@@ -89,6 +124,7 @@ class WebInference:
 
         # 3. Mapping & Alignment
         mapping_object = self.pipeline.match_objects(keypoint_objects, segment_objects)
+        mapping_object = self._clean_mapped_masks(mapping_object, W, H)
         if mapping_object:
             for m in mapping_object:
                 m["union_box"] = temp = union_box(m["kp_box"], m["seg_box"])
@@ -214,6 +250,9 @@ class WebInference:
                             "bbox_in_object_crop": bbox_in_crop,
                             "bbox_in_original": bbox_in_original,
                         })
+                        if anomaly_input_scope == 'full_frame':
+                            anomalies_full[-1]['cls_label'] = a.class_name or 'NG'
+                            anomalies_full[-1]['cls_similarity'] = float(a.confidence)
                         anom_crop = crop_pre[cy1:cy2, cx1:cx2]
                         if anom_crop.size != 0:
                             anom_name = f"ANOM_{name}_obj{i}_{ak}.jpg"
@@ -221,13 +260,17 @@ class WebInference:
                             cv2.imwrite(anom_path, anom_crop)
                             
                             # Gọi API phân loại của pipeline
-                            cls_res = self.pipeline.classify_defect(anom_path)
+                            cls_res = (
+                                self.pipeline.classify_defect(anom_path)
+                                if anomaly_input_scope != 'full_frame'
+                                else None
+                            )
                             if cls_res is not None:
                                 label = cls_res.get("label", "NG")
                                 sim = float(cls_res.get("similarity", 0.0))
                                 anomalies_full[-1]["cls_label"] = label
                                 anomalies_full[-1]["cls_similarity"] = sim
-                            else:
+                            elif anomaly_input_scope != 'full_frame':
                                 anomalies_full[-1]["cls_label"] = "NG"
                                 anomalies_full[-1]["cls_similarity"] = None
 
@@ -274,6 +317,11 @@ class WebInference:
                                     label_text = f"{a['cls_label']}? ({float(sim_val):.2f})"
                             else:
                                 label_text = a['cls_label']
+
+                        if anomaly_input_scope == 'full_frame' and a.get('cls_label'):
+                            label_text = a['cls_label']
+                            if sim_val is not None:
+                                label_text += f' ({float(sim_val):.2f})'
                                 
                         """
                         19082026 - KHAI - Increase font size for label in crop images
