@@ -2,6 +2,7 @@ import os
 import time
 import cv2
 import sys
+import threading
 import numpy as np
 from pathlib import Path
 from packages.workflow.pipeline import Pipeline
@@ -11,6 +12,7 @@ from packages.utils.utils import (ts, union_box, pad_and_clip_box,
 from packages.utils.visualize import concat_anomaly_crops
 from packages.workflow.events import default_event_bus, EventBus
 from packages.core.config import AppConfig
+from packages.ai.tasks.detection import YOLODetector
 
 # ROOT = 1_edge_node/  (2 levels up from services/inference_service/core.py)
 FILE = Path(__file__).resolve()
@@ -24,6 +26,138 @@ class WebInference:
     def __init__(self, config):
         self.cfg = config
         self.pipeline = Pipeline(config)
+
+        # Resolve model path cho phần Counting (ưu tiên MODEL_COUNTING_PATH, fallback MODEL_PATH)
+        od_model_path = getattr(self.cfg, "MODEL_COUNTING_PATH", None) or self.cfg.MODEL_PATH
+        if not os.path.isabs(od_model_path):
+            if os.path.exists(od_model_path):
+                od_model_path = os.path.abspath(od_model_path)
+            elif os.path.exists(os.path.join(str(ROOT.parent), od_model_path)):
+                od_model_path = os.path.join(str(ROOT.parent), od_model_path)
+            elif os.path.exists(os.path.join(str(ROOT), od_model_path)):
+                od_model_path = os.path.join(str(ROOT), od_model_path)
+
+        print(f"[INFERENCE] Khởi tạo mô hình Object Detection cho Counting: {od_model_path}")
+        self.counting_detector = YOLODetector(od_model_path, getattr(self.cfg, "ANOMALY_DEVICE", "CPU"))
+
+        # Lock bảo vệ đa luồng cho từng tác vụ
+        self.od_lock = threading.Lock()
+        self.inspection_lock = threading.Lock()
+
+    def run_detection(self, cam_id: str = "default") -> dict:
+        """
+        Chạy Object Detection và counting theo class trên một frame từ camera.
+        """
+        from services.camera_service.core import camera_manager
+        frame = camera_manager.get_frame(cam_id)
+        if frame is None:
+            return {"status": "error", "message": "No input frame available"}
+
+        if self.cfg.FLIP_VERTICAL:
+            frame = cv2.flip(frame, 0)
+
+        H, W = frame.shape[:2]
+        timestamp = ts()
+        start_time = time.time()
+
+        with self.od_lock:
+            result = self.counting_detector.predict(frame)
+
+        processing_time_ms = (time.time() - start_time) * 1000
+
+        objects = []
+        counts_by_class = {}
+
+        if result is not None and hasattr(result, "boxes") and len(result.boxes) > 0:
+            xyxy = result.boxes.xyxy.cpu().numpy().tolist()
+            confs = result.boxes.conf.cpu().numpy().tolist()
+            cls_ids = result.boxes.cls.cpu().numpy().astype(int).tolist()
+            names = getattr(result, "names", {})
+
+            for index, (box, conf, cls_id) in enumerate(zip(xyxy, confs, cls_ids)):
+                class_name = names.get(cls_id, "unknown") if isinstance(names, dict) else str(cls_id)
+                counts_by_class[class_name] = counts_by_class.get(class_name, 0) + 1
+                objects.append({
+                    "product_id": 1,
+                    "index": index,
+                    "bbox": [
+                        float(box[0]),
+                        float(box[1]),
+                        float(box[2]),
+                        float(box[3]),
+                    ],
+                    "score": float(conf),
+                    "class_id": int(cls_id),
+                    "class_name": class_name,
+                    "is_ng": False,
+                    "overlap_ratio": 0.0,
+                    "crop": "",
+                    "anomalies": [],
+                })
+
+        total_objects = len(objects)
+
+        image_name = f"IMG_{timestamp}.jpg"
+        image_path = os.path.join(self.pipeline.dir_original, image_name)
+        cv2.imwrite(image_path, frame)
+
+        # Vẽ bounding box và label tên class/score lên ảnh overall cho tác vụ Detection/Counting
+        overall_vis = frame.copy()
+        for obj in objects:
+            x1, y1, x2, y2 = [int(v) for v in obj["bbox"]]
+            cls_name = obj["class_name"] or "unknown"
+            conf = obj["score"]
+            label = f"{cls_name} {conf*100:.1f}%"
+
+            color = (235, 99, 37)
+            if cls_name == "washer":
+                color = (129, 185, 16)
+            elif cls_name == "wood_screw":
+                color = (11, 158, 245)
+
+            cv2.rectangle(overall_vis, (x1, y1), (x2, y2), color, 2)
+            (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+            label_top = max(0, y1 - th - baseline - 4)
+            cv2.rectangle(overall_vis, (x1, label_top), (x1 + tw + 6, y1), color, -1)
+            cv2.putText(overall_vis, label, (x1 + 3, y1 - baseline - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
+
+        overall_name = f"OVERALL_{timestamp}.jpg"
+        overall_path = os.path.join(self.pipeline.session_root, overall_name)
+        cv2.imwrite(overall_path, overall_vis)
+
+        record = {
+            "timestamp": timestamp,
+            "image": image_name,
+            "task_type": "detection",
+            "camera_id": cam_id,
+            "latency_ms": round(processing_time_ms, 2),
+            "total_objects": total_objects,
+            "ng_detected": False,
+            "objects": objects,
+        }
+
+        default_event_bus.publish(EventBus.EVENT_INFERENCE_DONE, record=record)
+
+        session_url = (
+            f"/captures/{self.cfg.PRODUCT_NAME}/sessions/"
+            f"{os.path.basename(self.pipeline.session_root)}"
+        )
+
+        return {
+            "status": "success",
+            "timestamp": timestamp,
+            "task": "detection",
+            "camera_id": cam_id,
+            "image_width": W,
+            "image_height": H,
+            "metrics": {
+                "latency_ms": round(processing_time_ms, 2),
+                "total_objects": total_objects,
+                "counts_by_class": counts_by_class,
+            },
+            "original_image_url": f"{session_url}/original/{image_name}",
+            "objects": objects,
+        }
 
     def run_inspect(self, cam_id: str = "default"):
         from services.camera_service.core import camera_manager

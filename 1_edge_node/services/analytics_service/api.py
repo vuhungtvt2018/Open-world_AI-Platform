@@ -579,3 +579,87 @@ async def get_result_image(image_name: str):
     if matches:
         return FileResponse(matches[0])
     return Response(status_code=404)
+
+
+@router.get("/api/dataset-records/{record_id}")
+async def get_dataset_record(record_id: int):
+    """
+    Trả chi tiết record và danh sách object kèm bbox, score, class
+    để frontend DatasetManagement (DatasetDetectionResult / DetectionResultImage) vẽ SVG bounding box lên ảnh.
+    """
+    import cv2
+    import json
+
+    db = SessionLocal()
+    try:
+        record = (
+            db.query(InspectionRecord)
+            .filter(InspectionRecord.id == record_id)
+            .first()
+        )
+
+        if record is None:
+            return Response(
+                status_code=404,
+                content="Dataset record not found",
+            )
+
+        image_name = (
+            record.original_image.split("/")[-1].split("\\")[-1]
+            if record.original_image
+            else f"IMG_{record.timestamp}.jpg"
+        )
+        image_pattern = os.path.join(
+            cfg.CAPTURE_DIR,
+            cfg.PRODUCT_NAME,
+            "sessions",
+            "*",
+            "original",
+            image_name,
+        )
+        image_matches = glob.glob(image_pattern)
+        image_width = 0
+        image_height = 0
+
+        if image_matches:
+            image = cv2.imread(image_matches[0])
+            if image is not None:
+                image_height, image_width = image.shape[:2]
+
+        objects = []
+        for obj in record.objects:
+            try:
+                bbox = json.loads(obj.bbox) if obj.bbox else []
+            except (json.JSONDecodeError, TypeError):
+                try:
+                    bbox = ast.literal_eval(obj.bbox) if obj.bbox else []
+                except (ValueError, SyntaxError):
+                    bbox = []
+
+            objects.append({
+                "index": obj.object_index,
+                "bbox": bbox,
+                "score": float(obj.score or 0.0),
+                "class_id": obj.class_id,
+                "class_name": obj.class_name,
+            })
+
+        counts_by_class = dict(
+            Counter(
+                obj["class_name"] or "unknown"
+                for obj in objects
+            )
+        )
+
+        return {
+            "id": record.id,
+            "task_type": record.task_type or "inspection",
+            "image_url": f"/api/image/{image_name}",
+            "image_width": image_width,
+            "image_height": image_height,
+            "total_objects": record.total_objects or len(objects),
+            "counts_by_class": counts_by_class,
+            "objects": objects,
+        }
+    finally:
+        db.close()

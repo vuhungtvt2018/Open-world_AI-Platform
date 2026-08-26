@@ -40,11 +40,12 @@ def seed_models():
     db = SessionLocal()
     try:
         if db.query(AIModel).count() == 0:
+            counting_model = getattr(cfg, "MODEL_COUNTING_PATH", None) or cfg.MODEL_PATH
             models = [
-                AIModel(id="m-det-01",  name=os.path.basename(cfg.MODEL_PATH),
-                        type="Detection", format=cfg.MODEL_PATH.split('.')[-1].upper(),
+                AIModel(id="m-det-01",  name=os.path.basename(counting_model),
+                        type="Detection", format=counting_model.split('.')[-1].upper(),
                         version="1.0.0", map_acc=91.4, status="PRODUCTION",
-                        file_path=cfg.MODEL_PATH, speed_ms="42ms"),
+                        file_path=counting_model, speed_ms="42ms"),
                 AIModel(id="m-anom-01", name=os.path.basename(cfg.ANOMALY_MODEL_PATH),
                         type="Anomaly",    format=cfg.ANOMALY_MODEL_PATH.split('.')[-1].upper(),
                         version="1.0.0", map_acc=89.5, status="PRODUCTION",
@@ -100,6 +101,7 @@ os.makedirs(SYNC_DEFECT_IMAGE_DIR, exist_ok=True)
 app.mount("/sync_images", StaticFiles(directory=SYNC_DEFECT_IMAGE_DIR), name="sync_images")
 
 # ── Include routers from services/ ──────────────────────────────────────────
+# pyrefly: ignore [missing-import]
 from services.camera_service import api as camera_service_api
 from services.inference_service import api as inference_service_api
 from services.analytics_service import api as analytics_service_api

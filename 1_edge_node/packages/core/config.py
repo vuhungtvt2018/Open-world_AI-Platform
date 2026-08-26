@@ -26,6 +26,7 @@ class AppConfig(BaseConfig):
     CAPTURE_DIR: str
     PRODUCT_NAME: str
     MODEL_PATH: str
+    MODEL_COUNTING_PATH: Optional[str] = None
 
     # ===== Edge/Robot Config (defaults) =====
     PROJECT_PATH: Optional[str] = None
@@ -104,6 +105,7 @@ class AppConfig(BaseConfig):
             EDGE_CODE=raw.get("EDGE_CODE"),
             PRODUCT_NAME=raw["PRODUCT_NAME"],
             MODEL_PATH=raw["MODEL_PATH"],
+            MODEL_COUNTING_PATH=raw.get("MODEL_COUNTING_PATH"),
 
             # Camera
             FLIP_VERTICAL=bool(raw.get("FLIP_VERTICAL", False)),
