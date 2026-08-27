@@ -1,5 +1,5 @@
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -51,6 +51,11 @@ class AppConfig(BaseConfig):
     ANOMALY_INPUT_SIZE: int = 512
     ANOMALY_SCORE_THRESHOLD: float = 0.8
     ANOMALY_INSIDE_OVERLAP_MIN: float = 0.5
+
+    """
+    25082026 - KHANH - Add runtime class-name mapping for YOLO anomaly models
+    """
+    YOLO_CLASS_NAMES: Dict[int, str] = field(default_factory=dict)
 
     # Anomaly region extraction & display
     ANOMALY_MIN_AREA_RATIO: float = 0.001
@@ -126,6 +131,10 @@ class AppConfig(BaseConfig):
             ANOMALY_INPUT_SIZE=int(raw.get("ANOMALY_INPUT_SIZE", 512)),
             ANOMALY_SCORE_THRESHOLD=float(raw.get("ANOMALY_SCORE_THRESHOLD", 0.8)),
             ANOMALY_INSIDE_OVERLAP_MIN=float(raw.get("ANOMALY_INSIDE_OVERLAP_MIN", 0.5)),
+            YOLO_CLASS_NAMES={
+                int(class_id): str(class_name)
+                for class_id, class_name in (raw.get("YOLO_CLASS_NAMES") or {}).items()
+            },
 
             # Anomaly region extraction & display
             ANOMALY_MIN_AREA_RATIO=float(raw.get("ANOMALY_MIN_AREA_RATIO", 0.001)),
@@ -181,6 +190,7 @@ class AnomalyConfig(BaseConfig):
     amap_threshold: float = 0.7
     redo_center_crop: bool = True
     center_crop: int = 448
+    class_names: Dict[int, str] = field(default_factory=dict)
 
     @staticmethod
     def from_yaml(path: str) -> "AnomalyConfig":
@@ -199,4 +209,8 @@ class AnomalyConfig(BaseConfig):
             amap_threshold=float(raw.get("ANOMALY_AMAP_THRESHOLD", 0.7)),
             redo_center_crop=bool(raw.get("REDO_CENTER_CROP", False)),
             center_crop=bool(raw.get("CENTER_CROP", 448)),
+            class_names={
+                int(class_id): str(class_name)
+                for class_id, class_name in (raw.get("YOLO_CLASS_NAMES") or {}).items()
+            },
         )

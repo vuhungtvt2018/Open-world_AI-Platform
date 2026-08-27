@@ -25,6 +25,9 @@ class WebInference:
         self.cfg = config
         self.pipeline = Pipeline(config)
 
+    """
+    25082026 - KHANH - Separate overlapping object masks using keypoint ownership
+    """
     def _clean_mapped_masks(self, mapped, width, height):
         if not mapped:
             return mapped
@@ -135,6 +138,9 @@ class WebInference:
         # 4. Rotation & Anomaly Detection
         ng_any = False
         per_objects = []
+        """
+        25082026 - KHANH - Run full-frame anomaly backends once per inspection
+        """
         anomaly_input_scope = getattr(self.pipeline.anomaly, 'input_scope', 'object')
         full_frame_anomaly_output = None
         if anomaly_input_scope == 'full_frame':
@@ -193,6 +199,9 @@ class WebInference:
                 crop_mask_pre = crop_mask[tight_y1:tight_y2, tight_x1:tight_x2]
 
                 # Anomaly Detection
+                """
+                25082026 - KHANH - Project full-frame YOLO results into each aligned object crop
+                """
                 if anomaly_input_scope == 'full_frame':
                     out = self.pipeline.anomaly.project_to_object(
                         full_frame_anomaly_output,
@@ -220,7 +229,20 @@ class WebInference:
                     hm_tile = hm_tile * mask_3ch
                     label_small = f"obj{i} {'NG' if is_ng else 'OK'}"
                     color = (0, 0, 255) if is_ng else (0, 200, 0)
-                    cv2.putText(hm_tile, label_small, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
+                    """
+                    25082026 - KHANH - Increase heatmap panel label size based on tile width
+                    """
+                    font_scale = min(2.0, max(1.3, hm_w / 150.0))
+                    thickness = 4
+                    (_, text_h), baseline = cv2.getTextSize(
+                        label_small, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness
+                    )
+                    label_y = min(hm_h - baseline - 5, text_h + 15)
+                    cv2.putText(
+                        hm_tile, label_small, (10, label_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness,
+                        cv2.LINE_AA,
+                    )
 
                 anomalies_full = []                
                 if is_ng:
@@ -250,6 +272,9 @@ class WebInference:
                             "bbox_in_object_crop": bbox_in_crop,
                             "bbox_in_original": bbox_in_original,
                         })
+                        """
+                        25082026 - KHANH - Use YOLO class name and confidence without classifier override
+                        """
                         if anomaly_input_scope == 'full_frame':
                             anomalies_full[-1]['cls_label'] = a.class_name or 'NG'
                             anomalies_full[-1]['cls_similarity'] = float(a.confidence)
@@ -260,6 +285,9 @@ class WebInference:
                             cv2.imwrite(anom_path, anom_crop)
                             
                             # Gọi API phân loại của pipeline
+                            """
+                            25082026 - KHANH - Call defect classifier only for crop-based anomaly backends
+                            """
                             cls_res = (
                                 self.pipeline.classify_defect(anom_path)
                                 if anomaly_input_scope != 'full_frame'
@@ -318,6 +346,9 @@ class WebInference:
                             else:
                                 label_text = a['cls_label']
 
+                        """
+                        25082026 - KHANH - Always display YOLO labels on object crop visualizations
+                        """
                         if anomaly_input_scope == 'full_frame' and a.get('cls_label'):
                             label_text = a['cls_label']
                             if sim_val is not None:
@@ -326,12 +357,23 @@ class WebInference:
                         """
                         19082026 - KHAI - Increase font size for label in crop images
                         """
-                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 3, 2)
+                        """
+                        25082026 - KHANH - Increase crops panel label size and thickness
+                        """
+                        crop_font_scale = 4
+                        crop_font_thickness = 4
+                        (tw, th), _ = cv2.getTextSize(
+                            label_text, cv2.FONT_HERSHEY_SIMPLEX,
+                            crop_font_scale, crop_font_thickness,
+                        )
                         tx1, ty1 = cx1, max(0, cy1 - th - 6)
                         tx2, ty2 = cx1 + tw + 8, cy1
                         cv2.rectangle(crop_labeled, (tx1, ty1), (tx2, ty2), (0, 0, 255), -1)
-                        cv2.putText(crop_labeled, label_text, (cx1 + 3, cy1 - 6), cv2.FONT_HERSHEY_SIMPLEX, 3,
-                                    (255, 255, 255), 2, cv2.LINE_AA)
+                        cv2.putText(
+                            crop_labeled, label_text, (cx1 + 3, cy1 - 6),
+                            cv2.FONT_HERSHEY_SIMPLEX, crop_font_scale,
+                            (255, 255, 255), crop_font_thickness, cv2.LINE_AA,
+                        )
 
                 per_objects.append({
                     "product_id": 1,

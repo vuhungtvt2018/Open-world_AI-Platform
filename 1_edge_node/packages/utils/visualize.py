@@ -32,6 +32,9 @@ def concat_anomaly_crops(anomaly_crop_views: List[np.ndarray], target_h: int = 3
         cols = math.ceil(math.sqrt(num_views))
         rows = math.ceil(num_views / cols)
 
+    """
+    25082026 - KHANH - Resize visualization tiles without changing object aspect ratio
+    """
     resized = []
     for img in valid_views:
         src_h, src_w = img.shape[:2]
@@ -42,19 +45,28 @@ def concat_anomaly_crops(anomaly_crop_views: List[np.ndarray], target_h: int = 3
             img, (new_w, target_h), interpolation=interpolation
         ))
 
-    grid_rows = []
-    for r in range(rows):
-        row_imgs = resized[r * cols : (r + 1) * cols]
-        if row_imgs:
-            grid_rows.append(cv2.hconcat(row_imgs))
+    """
+    25082026 - KHANH - Keep grid columns aligned across rows with variable crop widths
+    """
+    column_widths = []
+    for col in range(cols):
+        widths = [
+            resized[index].shape[1]
+            for index in range(col, num_views, cols)
+        ]
+        column_widths.append(max(widths) if widths else 1)
 
-    max_row_w = max(row.shape[1] for row in grid_rows)
-    for index, row in enumerate(grid_rows):
-        pad_right = max_row_w - row.shape[1]
-        if pad_right > 0:
-            grid_rows[index] = cv2.copyMakeBorder(
-                row, 0, 0, 0, pad_right,
-                cv2.BORDER_CONSTANT, value=(0, 0, 0),
-            )
+    grid_rows = []
+    for row in range(rows):
+        row_cells = []
+        for col, cell_w in enumerate(column_widths):
+            index = row * cols + col
+            cell = np.zeros((target_h, cell_w, 3), dtype=np.uint8)
+            if index < num_views:
+                image = resized[index]
+                offset_x = (cell_w - image.shape[1]) // 2
+                cell[:, offset_x:offset_x + image.shape[1]] = image
+            row_cells.append(cell)
+        grid_rows.append(cv2.hconcat(row_cells))
 
     return cv2.vconcat(grid_rows)

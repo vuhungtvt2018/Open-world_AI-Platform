@@ -11,7 +11,6 @@ from packages.utils.utils import pad_and_clip_box
 
 
 class YOLOInferencer(BaseVisionTask):
-    input_scope = 'full_frame'
     """
     Inferencer phát hiện vùng bất thường bằng Ultralytics YOLO.
 
@@ -23,6 +22,11 @@ class YOLOInferencer(BaseVisionTask):
     - YOLO detection: bbox được dùng làm vùng anomaly.
     - YOLO segmentation: mask của model được dùng làm vùng anomaly.
     """
+
+    """
+    25082026 - KHANH - Mark YOLO anomaly inference as a full-frame backend
+    """
+    input_scope = 'full_frame'
 
     def __init__(
         self,
@@ -51,6 +55,14 @@ class YOLOInferencer(BaseVisionTask):
         self.show_all_boxes = bool(
             self._get_config(config, "show_all_boxes", True)
         )
+        """
+        25082026 - KHANH - Load runtime YOLO class-name overrides by class ID
+        """
+        configured_names = self._get_config(config, "class_names", {}) or {}
+        self.class_names = {
+            int(class_id): str(class_name)
+            for class_id, class_name in configured_names.items()
+        }
 
         super().__init__(model_path, device, config)
 
@@ -286,6 +298,9 @@ class YOLOInferencer(BaseVisionTask):
             **kwargs,
         )
 
+    """
+    25082026 - KHANH - Run YOLO once on the full frame and project results to object crops
+    """
     def run_full_frame(self, image: np.ndarray) -> Tuple[Optional[np.ndarray], Any]:
         return self.predict(self.preprocess(image))
 
@@ -320,6 +335,9 @@ class YOLOInferencer(BaseVisionTask):
             visualized_image=crop_bgr.copy(), raw_output=full_frame_output,
         )
 
+    """
+    25082026 - KHANH - Transform full-frame anomaly maps and boxes to aligned crop coordinates
+    """
     @staticmethod
     def _project_anomaly_map(
         anomaly_full, rotation_matrix, crop_origin, tight_origin, crop_shape,
@@ -463,8 +481,9 @@ class YOLOInferencer(BaseVisionTask):
         mask[y1:y2, x1:x2] = 1
         return mask
 
-    @staticmethod
-    def _get_class_name(names: Any, class_id: int) -> str:
+    def _get_class_name(self, names: Any, class_id: int) -> str:
+        if class_id in self.class_names:
+            return self.class_names[class_id]
         if isinstance(names, dict):
             return str(names.get(class_id, f"class_{class_id}"))
         if isinstance(names, (list, tuple)) and 0 <= class_id < len(names):
@@ -476,18 +495,26 @@ class YOLOInferencer(BaseVisionTask):
         crop_bgr: np.ndarray,
         anomaly_map: np.ndarray,
     ) -> np.ndarray:
-        heatmap_u8 = np.clip(anomaly_map * 255.0, 0, 255).astype(np.uint8)
-        heatmap_bgr = cv2.applyColorMap(heatmap_u8, cv2.COLORMAP_JET)
-        overlay_bgr = cv2.addWeighted(
-            crop_bgr,
-            0.6,
-            heatmap_bgr,
-            0.4,
-            0.0,
-        )
+        """
+        25082026 - KHANH - Preserve object colors and overlay anomaly segmentation in red
+        """
+        segmentation = anomaly_map > 0
+        overlay_bgr = crop_bgr.copy()
+        if np.any(segmentation):
+            red = np.array([0, 0, 255], dtype=np.float32)
+            original = overlay_bgr[segmentation].astype(np.float32)
+            overlay_bgr[segmentation] = np.clip(
+                original * 0.45 + red * 0.55, 0, 255
+            ).astype(np.uint8)
+            contours, _ = cv2.findContours(
+                segmentation.astype(np.uint8),
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE,
+            )
+            cv2.drawContours(overlay_bgr, contours, -1, (0, 0, 255), 2)
 
         # Giữ cùng convention với AnomalibInferencer hiện tại.
-        return cv2.cvtColor(overlay_bgr, cv2.COLOR_BGR2RGB)
+        return overlay_bgr
 
     @staticmethod
     def _draw_boxes(

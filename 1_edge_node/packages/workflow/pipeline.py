@@ -66,6 +66,9 @@ class Pipeline:
             getattr(self.cfg, "ANOMALY_BACKEND", "anomalib")
         ).strip().lower()
 
+        """
+        25082026 - KHANH - Forward runtime YOLO class-name mapping to anomaly inferencer
+        """
         anom_cfg = AnomalyConfig(
             input_size=self.cfg.ANOMALY_INPUT_SIZE,
             score_thres=self.cfg.ANOMALY_SCORE_THRESHOLD,
@@ -76,7 +79,8 @@ class Pipeline:
             show_all_boxes=self.cfg.SHOW_ALL_ANOMALY_BOXES,
             amap_threshold=self.cfg.ANOMALY_AMAP_THRESHOLD,
             redo_center_crop=self.cfg.REDO_CENTER_CROP,
-            center_crop=self.cfg.CENTER_CROP
+            center_crop=self.cfg.CENTER_CROP,
+            class_names=self.cfg.YOLO_CLASS_NAMES,
         )
         """
         07082026 - KHAI - Change parameter name (refactoring)
