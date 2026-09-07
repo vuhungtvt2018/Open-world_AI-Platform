@@ -28,6 +28,8 @@ interface CameraItem {
   id: string;
   name: string;
   status: 'disconnected' | 'connecting' | 'online' | 'error';
+  width: number | null;
+  height: number | null;
   resolution: string;
   fps: number | null;
   bitrate: string;
@@ -58,6 +60,9 @@ interface CameraApiItem {
 interface CameraFormState {
   cameraId: string;
   name: string;
+  width: string;
+  height: string;
+  fps: string;
   sourceType: CameraSourceType;
   sourceUrl: string;
   serialNumber: string;
@@ -67,6 +72,9 @@ interface CameraFormState {
 const EMPTY_CAMERA_FORM: CameraFormState = {
   cameraId: '',
   name: '',
+  width: '',
+  height: '',
+  fps: '',
   sourceType: 'rtsp',
   sourceUrl: '',
   serialNumber: '',
@@ -77,6 +85,8 @@ const EMPTY_CAMERA: CameraItem = {
   id: '',
   name: 'No camera configured',
   status: 'disconnected',
+  width: null,
+  height: null,
   resolution: '-',
   fps: null,
   bitrate: '-',
@@ -116,6 +126,8 @@ export default function LiveStream() {
         id: camera.camera_id,
         name: camera.name,
         status: camera.status,
+        width: camera.width,
+        height: camera.height,
         resolution: camera.width && camera.height ? `${camera.width}x${camera.height}` : '-',
         fps: camera.fps,
         bitrate: '-',
@@ -156,6 +168,9 @@ export default function LiveStream() {
     setCameraForm({
       cameraId: camera.id,
       name: camera.name,
+      width: String(camera.width ?? ''),
+      height: String(camera.height ?? ''),
+      fps: String(camera.fps ?? ''),
       sourceType: camera.sourceType,
       sourceUrl: camera.sourceUrl,
       serialNumber: camera.serialNumber,
@@ -213,6 +228,14 @@ export default function LiveStream() {
       return;
     }
 
+    const width = Number(cameraForm.width);
+    const height = Number(cameraForm.height);
+    const fps = Number(cameraForm.fps);
+    if (!Number.isInteger(width) || width <= 0 || !Number.isInteger(height) || height <= 0 || !Number.isFinite(fps) || fps <= 0) {
+      setMessage('Width, Height và FPS phải là các giá trị dương hợp lệ');
+      return;
+    }
+
     setIsBusy(true);
     try {
       const oldCamera = cameras.find((camera) => camera.id === editingCameraId);
@@ -222,6 +245,9 @@ export default function LiveStream() {
         body: JSON.stringify({
           camera_id: cameraForm.cameraId.trim(),
           name: cameraForm.name.trim(),
+          width,
+          height,
+          fps,
           source_type: cameraForm.sourceType,
           source_url: cameraForm.sourceType === 'rtsp' ? cameraForm.sourceUrl.trim() : null,
           serial_number: cameraForm.sourceType === 'basler' ? cameraForm.serialNumber : null,
@@ -526,6 +552,36 @@ export default function LiveStream() {
                   value={cameraForm.name}
                   placeholder="Camera Line 1"
                   onChange={(event) => setCameraForm((current) => ({ ...current, name: event.target.value }))}
+                />
+
+                <label>Width</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={cameraForm.width}
+                  placeholder="4608"
+                  onChange={(event) => setCameraForm((current) => ({ ...current, width: event.target.value }))}
+                />
+
+                <label>Height</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={cameraForm.height}
+                  placeholder="3288"
+                  onChange={(event) => setCameraForm((current) => ({ ...current, height: event.target.value }))}
+                />
+
+                <label>FPS</label>
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={cameraForm.fps}
+                  placeholder="30"
+                  onChange={(event) => setCameraForm((current) => ({ ...current, fps: event.target.value }))}
                 />
 
                 <label>Source Type</label>

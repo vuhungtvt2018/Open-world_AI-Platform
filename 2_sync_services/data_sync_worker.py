@@ -1,13 +1,12 @@
 import time
 import requests
 import os
-import ast
 import sqlite3
 import yaml
-from datetime import datetime
 import json
 import glob
 import sys
+import base64
 
 # 19082026 - KHANH - Cau hinh UTF-8 de worker khong bi crash khi in log tieng Viet tren Windows.
 if hasattr(sys.stdout, "reconfigure"):
@@ -21,7 +20,6 @@ def load_config():
         return yaml.safe_load(f)
 
 cfg = load_config()
-import base64
 
 DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), cfg["DB_PATH"]))
 

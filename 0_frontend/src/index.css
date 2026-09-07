@@ -20,6 +20,7 @@
   --sidebar-text: #475569;
   --sidebar-active: #eff6ff;
   --border-focus: #2563eb;
+  --gradient-start: #eff6ff;
 }
 
 [data-theme='dark'] {
@@ -39,6 +40,7 @@
   --sidebar-active: #334155;
   --surface-hover: #334155;
   --border-focus: #3b82f6;
+  --gradient-start: transparent;
 }
 
 body {

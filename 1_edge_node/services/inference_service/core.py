@@ -7,8 +7,8 @@ import numpy as np
 from pathlib import Path
 from packages.workflow.pipeline import Pipeline
 from packages.utils.utils import (ts, union_box, pad_and_clip_box, 
-                     arrow_angle, rotate_image, transform_points, need_clean, clean_data,
-                     transform_bbox_to_original_coords)
+                    arrow_angle, rotate_image, transform_points, need_clean, clean_data,
+                    transform_bbox_to_original_coords)
 from packages.utils.visualize import concat_anomaly_crops
 from packages.workflow.events import default_event_bus, EventBus
 from packages.core.config import AppConfig
@@ -169,7 +169,7 @@ class WebInference:
         for item in mapped:
             p1, p2 = item['keypoints'][0], item['keypoints'][1]
             seeds.append(((float(p1[0]) + float(p2[0])) / 2.0,
-                          (float(p1[1]) + float(p2[1])) / 2.0))
+                        (float(p1[1]) + float(p2[1])) / 2.0))
         original_masks = [
             (item['mask'] > 0).astype(np.uint8) for item in mapped
         ]
@@ -229,7 +229,7 @@ class WebInference:
                         or pt2[-1] < self.cfg.KEYPOINTS_SCORE_THRESHOLD):
                     continue
                 filtered_keypoints.append([[int(pt1[0]), int(pt1[1]), pt1[-1]],
-                                           [int(pt2[0]), int(pt2[1]), pt2[-1]]])
+                                        [int(pt2[0]), int(pt2[1]), pt2[-1]]])
                 x, y, w, h = box
                 filtered_box.append([int(x - w/2), int(y - h/2), int(x + w/2), int(y + h/2)])
             keypoint_objects.append({
@@ -266,7 +266,7 @@ class WebInference:
             for m in mapping_object:
                 m["union_box"] = temp = union_box(m["kp_box"], m["seg_box"])
                 x1p, y1p, x2p, y2p = pad_and_clip_box(temp[0], temp[1], temp[2], temp[3],
-                                                       self.cfg.PAD_RATIO, W, H, square=True)
+                                                    self.cfg.PAD_RATIO, W, H, square=True)
                 m["union_box_pad"] = [x1p, y1p, x2p, y2p]
 
         # 4. Rotation & Anomaly Detection

@@ -2,7 +2,6 @@ import threading
 import time
 from typing import Optional
 
-import cv2
 from pypylon import pylon
 
 
@@ -59,6 +58,7 @@ class Basler_Threaded_Camera:
         gain: Optional[float] = None,
         width: Optional[int] = None,
         height: Optional[int] = None,
+        fps: Optional[float] = None,
         auto_resolution: bool = True,
     ):
         """
@@ -83,30 +83,45 @@ class Basler_Threaded_Camera:
 
         self.serial_number = str(serial_number) if serial_number else None
         self.camera = pylon.InstantCamera(device)
-        self.camera.Open()
+        try:
+            self.camera.Open()
 
-        if exposure_time_us is not None and self.camera.ExposureTime.IsWritable():
-            self.camera.ExposureTime.SetValue(float(exposure_time_us))
+            if exposure_time_us is not None and self.camera.ExposureTime.IsWritable():
+                self.camera.ExposureTime.SetValue(float(exposure_time_us))
 
-        if gain is not None and self.camera.Gain.IsWritable():
-            self.camera.Gain.SetValue(float(gain))
+            if gain is not None and self.camera.Gain.IsWritable():
+                self.camera.Gain.SetValue(float(gain))
 
-        if auto_resolution:
-            if self.camera.Width.TrySetToMaximum():
-                pass
-            if self.camera.Height.TrySetToMaximum():
-                pass
-        elif width is not None and self.camera.Width.IsWritable():
-            self.camera.Width.SetValue(int(width))
-        elif height is not None and self.camera.Height.IsWritable():
-            self.camera.Height.SetValue(int(height))
+            if auto_resolution:
+                if self.camera.Width.TrySetToMaximum():
+                    pass
+                if self.camera.Height.TrySetToMaximum():
+                    pass
+            elif width is not None and self.camera.Width.IsWritable():
+                self.camera.Width.SetValue(int(width))
+            elif height is not None and self.camera.Height.IsWritable():
+                self.camera.Height.SetValue(int(height))
 
-        if width is not None and self.camera.Width.IsWritable():
-            self.camera.Width.SetValue(int(width))
-        if height is not None and self.camera.Height.IsWritable():
-            self.camera.Height.SetValue(int(height))
+            if width is not None and self.camera.Width.IsWritable():
+                self.camera.Width.SetValue(int(width))
+            if height is not None and self.camera.Height.IsWritable():
+                self.camera.Height.SetValue(int(height))
 
-        self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+            if fps is not None:
+                frame_rate_enable = getattr(self.camera, "AcquisitionFrameRateEnable", None)
+                frame_rate = getattr(self.camera, "AcquisitionFrameRate", None)
+                if frame_rate_enable is not None and frame_rate_enable.IsWritable():
+                    frame_rate_enable.SetValue(True)
+                if frame_rate is not None and frame_rate.IsWritable():
+                    frame_rate.SetValue(float(fps))
+
+            self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
+        except Exception:
+            if self.camera.IsGrabbing():
+                self.camera.StopGrabbing()
+            if self.camera.IsOpen():
+                self.camera.Close()
+            raise
 
         self.converter = pylon.ImageFormatConverter()
         self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed
@@ -155,9 +170,10 @@ class Basler_Threaded_Camera:
         self.running = False
         if self.camera.IsGrabbing():
             self.camera.StopGrabbing()
+        if self.t.is_alive():
+            self.t.join(timeout=6.0)
         if self.camera.IsOpen():
             self.camera.Close()
-        self.t.join(timeout=1.0)
 
     def __del__(self):
         """

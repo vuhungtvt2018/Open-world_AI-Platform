@@ -27,7 +27,7 @@ from schemas import (
 from embedding import embed_pil
 from PIL import Image
 
-app = FastAPI(title="AI Visual Inspection - Photo Library & Vector DB")
+app = FastAPI(title="SmartIC - Photo Library & Vector DB")
 
 from fastapi.middleware.cors import CORSMiddleware
 app.add_middleware(

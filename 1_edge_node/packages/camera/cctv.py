@@ -10,7 +10,7 @@ class RTSP_Threaded_Camera:
     19082026 - KIET - Đọc RTSP/local camera độc lập trên thread và tự kết nối lại khi mất frame.
     """
 
-    def __init__(self, rtsp_url: str | int, width: Optional[int] = None, height: Optional[int] = None):
+    def __init__(self, rtsp_url: str | int, width: Optional[int] = None, height: Optional[int] = None, fps: Optional[float] = None):
         """
         19082026 - KIET - Khởi tạo camera từ URL/index riêng của từng camera ID.
         """
@@ -18,6 +18,7 @@ class RTSP_Threaded_Camera:
         self.rtsp_url = rtsp_url
         self.width = width
         self.height = height
+        self.fps = fps
         self.cap = self._open_capture()
         if self.cap is None:
             raise RuntimeError(f"Cannot open RTSP: {rtsp_url}")
@@ -43,6 +44,8 @@ class RTSP_Threaded_Camera:
             capture.set(cv2.CAP_PROP_FRAME_WIDTH, int(self.width))
         if self.height is not None:
             capture.set(cv2.CAP_PROP_FRAME_HEIGHT, int(self.height))
+        if self.fps is not None:
+            capture.set(cv2.CAP_PROP_FPS, float(self.fps))
         return capture
 
     def _loop(self):

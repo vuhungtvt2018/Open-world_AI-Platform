@@ -27,6 +27,7 @@ class CameraManager:
         self.camera_configs = {}
         self.camera_status = {}
         self.camera_lock = threading.RLock()
+        self.camera_operation_lock = threading.RLock()
         self.current_frame = None
         self.current_image_name = "in_memory_image"
 
@@ -67,6 +68,10 @@ class CameraManager:
         19082026 - KIET - Kết nối đúng RTSP URL hoặc Basler serial theo camera ID.
         """
 
+        with self.camera_operation_lock:
+            self._connect_camera(camera_id)
+
+    def _connect_camera(self, camera_id: str) -> None:
         camera_id = str(camera_id)
         with self.camera_lock:
             camera_config = self.camera_configs.get(camera_id)
@@ -85,6 +90,7 @@ class CameraManager:
             source_type = camera_config["source_type"]
             width = camera_config.get("width") or self.cfg.CAM_WIDTH
             height = camera_config.get("height") or self.cfg.CAM_HEIGHT
+            fps = camera_config.get("fps")
 
             if source_type == "rtsp":
                 source = camera_config.get("source_url")
@@ -97,6 +103,7 @@ class CameraManager:
                     source,
                     width=width,
                     height=height,
+                    fps=fps,
                 )
                 input_mode = "stream"
             elif source_type == "basler":
@@ -104,6 +111,7 @@ class CameraManager:
                     serial_number=camera_config.get("serial_number"),
                     width=width,
                     height=height,
+                    fps=fps,
                 )
                 input_mode = "basler"
             else:
@@ -129,6 +137,10 @@ class CameraManager:
         19082026 - KIET - Dừng đúng camera instance mà không ảnh hưởng camera khác.
         """
 
+        with self.camera_operation_lock:
+            self._disconnect_camera(camera_id, preserve_status)
+
+    def _disconnect_camera(self, camera_id: str, preserve_status: bool = False) -> None:
         camera_id = str(camera_id)
         with self.camera_lock:
             camera = self.cameras.pop(camera_id, None)

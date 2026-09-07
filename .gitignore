@@ -11,6 +11,7 @@ node_modules
 # Temporary files
 sync_defect_image
 uploads
+dataset
 
 # Checkpoint files
 *.onnx

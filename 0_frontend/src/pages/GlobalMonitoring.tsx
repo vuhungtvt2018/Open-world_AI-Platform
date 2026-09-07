@@ -30,7 +30,7 @@ export default function GlobalMonitoring() {
   const [history, setHistory] = useState<any[]>([]);
   const [metrics, setMetrics] = useState({
     throughput: 0,
-    defectRate: 0,
+    InspectionRate: 0,
     totalObjects: 0,
     avgObjectsPerFrame: 0,
     avgLatency: 0,
@@ -71,7 +71,7 @@ export default function GlobalMonitoring() {
 
       setMetrics({
         throughput: total,
-        defectRate: dRate,
+        InspectionRate: dRate,
         totalObjects: totalObjs,
         avgObjectsPerFrame: avgObjs,
         avgLatency: avgLat,
@@ -169,11 +169,11 @@ export default function GlobalMonitoring() {
         ) : (
           <div className="metric-card glass-panel">
             <div className="metric-header">
-              <h3 className="text-muted">Defect Rate (NG)</h3>
+              <h3 className="text-muted">Inspection Rate (NG)</h3>
               <AlertTriangle size={20} color="var(--warning)" />
             </div>
             <div className="metric-value text-warning">
-              {metrics.defectRate.toFixed(1)}
+              {metrics.InspectionRate.toFixed(1)}
               <span className="metric-unit">%</span>
             </div>
             <div className="metric-trend text-success">Live Analysis</div>

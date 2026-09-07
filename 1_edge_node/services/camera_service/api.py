@@ -34,9 +34,9 @@ class CameraConfigRequest(BaseModel):
     serial_number: str | None = None
     assigned_task: Literal["detection", "inspection"] | None = None
     enabled: bool = False
-    width: int | None = None
-    height: int | None = None
-    fps: float | None = None
+    width: int = Field(gt=0)
+    height: int = Field(gt=0)
+    fps: float = Field(gt=0)
 
 
 class CameraAssignmentRequest(BaseModel):

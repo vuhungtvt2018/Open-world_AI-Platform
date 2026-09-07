@@ -66,7 +66,7 @@ export default function Sidebar({ activeTab, onTabChange, userRole, onRoleChange
         {!isCollapsed && (
           <div className="logo-section">
             <div className="logo-text">
-              <h2 className="text-primary">VISUAL INSPECTION</h2>
+              <h1 className="text-primary">SmartIC</h1>
             </div>
           </div>
         )}
