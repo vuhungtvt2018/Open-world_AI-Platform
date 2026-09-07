@@ -26,7 +26,7 @@ import './Analytics.css';
 
 const EDGE_API_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000';
 
-type AnalyticsMode = 'counting' | 'defect';
+type AnalyticsMode = 'counting' | 'inspection';
 
 interface DistributionItem {
   name: string;
@@ -78,7 +78,7 @@ export default function Analytics() {
   React.useEffect(() => {
     let active = true;
 
-    // 23082026-KIET-Tải đúng analytics schema theo Counting hoặc Defect mode
+    // 23082026-KIET-Tải đúng analytics schema theo Counting hoặc Inspection mode
     const fetchAnalytics = async () => {
       try {
         const query = new URLSearchParams({ date: selectedDate, mode });
@@ -172,14 +172,14 @@ export default function Analytics() {
           <p className="text-muted">
             {mode === 'counting'
               ? 'Object counting performance and class distribution'
-              : 'Production quality and defect pattern analysis'}
+              : 'Production quality and inspection pattern analysis'}
           </p>
         </div>
         <div className="header-actions">
-          {/* 23082026-KIET-Chuyển nhanh giữa Counting Analytics và Defect Analytics */}
+          {/* 23082026-KIET-Chuyển nhanh giữa Counting Analytics và Inspection Analytics */}
           <div className="analytics-mode-switch">
             <button className={mode === 'counting' ? 'active' : ''} onClick={() => setMode('counting')}>Counting</button>
-            <button className={mode === 'defect' ? 'active' : ''} onClick={() => setMode('defect')}>Defect</button>
+            <button className={mode === 'inspection' ? 'active' : ''} onClick={() => setMode('inspection')}>Inspection</button>
           </div>
           <div
             className="date-picker"
@@ -288,7 +288,7 @@ export default function Analytics() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                 <XAxis dataKey="time" axisLine={false} tickLine={false} fontSize={12} tick={{fill: '#64748b'}} />
-                <YAxis domain={mode === 'defect' ? [0, 100] : undefined} axisLine={false} tickLine={false} fontSize={12} tick={{fill: '#64748b'}} />
+                <YAxis domain={mode === 'inspection' ? [0, 100] : undefined} axisLine={false} tickLine={false} fontSize={12} tick={{fill: '#64748b'}} />
                 <Tooltip 
                   contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'}}
                 />
@@ -298,11 +298,11 @@ export default function Analytics() {
           </div>
         </section>
 
-        {/* 23082026-KIET-Hiển thị class distribution cho Counting hoặc Pareto cho Defect */}
+        {/* 23082026-KIET-Hiển thị class distribution cho Counting hoặc Pareto cho Inspection */}
         <section className="chart-section glass-panel">
           <div className="section-header">
             <BarChart3 size={20} className="text-primary" />
-            <h2>{mode === 'counting' ? 'Object Class Distribution' : 'Defect Pareto Analysis'}</h2>
+            <h2>{mode === 'counting' ? 'Object Class Distribution' : 'Inspection Pareto Analysis'}</h2>
           </div>
           <div className="chart-wrapper">
             {(mode === 'counting' ? stats.classDistribution : stats.pareto).length ? (

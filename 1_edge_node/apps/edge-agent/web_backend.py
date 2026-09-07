@@ -19,7 +19,7 @@ from services.database.crud import create_inspection_record
 from services.camera_service.core import camera_manager
 from packages.utils.cleaner import run_cleaner_daemon
 
-app = FastAPI(title="Visual Inspection AI")
+app = FastAPI(title="SmartIC AI")
 
 app.add_middleware(
     CORSMiddleware,

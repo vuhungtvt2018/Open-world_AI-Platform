@@ -18,7 +18,11 @@ from packages.core.config import AppConfig
 from packages.utils.session import make_session_dir
 from packages.utils.utils import (ensure_dirs, compute_iou)
 from packages.ai.tasks.detection import YOLODetector
-from packages.ai.tasks.anomaly import AnomalyInferencer, AnomalyConfig
+from packages.ai.tasks.anomaly import (
+    AnomalibInferencer,
+    YOLOInferencer,
+    AnomalyConfig,
+)
 
 """
 06082026 - KHAI - Refactor code to adhere to modified AnomalyInferencer
@@ -57,7 +61,14 @@ class Pipeline:
             print("[PIPELINE] Khởi tạo mô hình YOLODetector Keypoints...")
             self.keypoint_detection = YOLODetector(self.cfg.KEYPOINTS_MODEL_PATH, self.cfg.ANOMALY_DEVICE)
 
-        print("[PIPELINE] Khởi tạo mô hình Anomaly (Anomalib)...")
+        print(getattr(self.cfg, "ANOMALY_BACKEND"))
+        anomaly_backend = str(
+            getattr(self.cfg, "ANOMALY_BACKEND", "anomalib")
+        ).strip().lower()
+
+        """
+        25082026 - KHANH - Forward runtime YOLO class-name mapping to anomaly inferencer
+        """
         anom_cfg = AnomalyConfig(
             input_size=self.cfg.ANOMALY_INPUT_SIZE,
             score_thres=self.cfg.ANOMALY_SCORE_THRESHOLD,
@@ -68,19 +79,38 @@ class Pipeline:
             show_all_boxes=self.cfg.SHOW_ALL_ANOMALY_BOXES,
             amap_threshold=self.cfg.ANOMALY_AMAP_THRESHOLD,
             redo_center_crop=self.cfg.REDO_CENTER_CROP,
-            center_crop=self.cfg.CENTER_CROP
+            center_crop=self.cfg.CENTER_CROP,
+            class_names=self.cfg.YOLO_CLASS_NAMES,
         )
         """
         07082026 - KHAI - Change parameter name (refactoring)
         """
-        self.anomaly = AnomalyInferencer(
-            model_path=self.cfg.ANOMALY_MODEL_PATH,
-            device=self.cfg.ANOMALY_DEVICE,
-            config=anom_cfg,
-        )
+        """
+        23082026 - KHANH - Add inferencer type options anomalib/yolo
+        """
+        if anomaly_backend == "anomalib":
+            print("[PIPELINE] Khởi tạo mô hình Anomaly (Anomalib)...")
+            self.anomaly = AnomalibInferencer(
+                model_path=self.cfg.ANOMALY_MODEL_PATH,
+                device=self.cfg.ANOMALY_DEVICE,
+                config=anom_cfg,
+            )
+        elif anomaly_backend == "yolo":
+            print("[PIPELINE] Khởi tạo mô hình Anomaly (YOLO)...")
+            self.anomaly = YOLOInferencer(
+                model_path=self.cfg.ANOMALY_MODEL_PATH,
+                device=self.cfg.ANOMALY_DEVICE,
+                config=anom_cfg,
+            )
+        else:
+            raise ValueError(
+                "ANOMALY_BACKEND không hợp lệ: "
+                f"{anomaly_backend!r}. "
+                "Giá trị hỗ trợ: 'anomalib' hoặc 'yolo'."
+            )
         
         # Thử tải mô hình vào bộ nhớ (warmup)
-        print("[PIPELINE] Khởi động Anomalib (warmup)...")
+        print(f"[PIPELINE] Khởi động {anomaly_backend} (warmup)...")
         dummy_img = np.zeros((self.cfg.ANOMALY_INPUT_SIZE, self.cfg.ANOMALY_INPUT_SIZE, 3), dtype=np.uint8)
         dummy_mask = np.ones((self.cfg.ANOMALY_INPUT_SIZE, self.cfg.ANOMALY_INPUT_SIZE), dtype=np.uint8)
         self.anomaly.run(dummy_img, dummy_mask)

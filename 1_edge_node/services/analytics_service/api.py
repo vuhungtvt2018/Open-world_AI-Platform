@@ -29,7 +29,7 @@ router = APIRouter(tags=["Analytics"])
 23082026 - KHAI - Modify implementation of get_analytics to align with Vietnamese timezone and allow for reuse when exporting
 """
 # 23082026-KIET-Query record Analytics theo ngày Việt Nam và task mode để tái sử dụng khi export
-def _query_analytics_records(db, date: str, mode: Literal["counting", "defect"]):
+def _query_analytics_records(db, date: str, mode: Literal["counting", "inspection"]):
     from sqlalchemy import or_
     from sqlalchemy.orm import selectinload
     from services.database.models import InspectionObject
@@ -66,7 +66,7 @@ def _query_analytics_records(db, date: str, mode: Literal["counting", "defect"])
 @router.get("/analytics")
 async def get_analytics(
     date: str = None,
-    mode: Literal["counting", "defect"] = "defect",
+    mode: Literal["counting", "inspection"] = "inspection",
 ):
     """date: YYYY-MM-DD string in local time (UTC+7). Defaults to today."""
 
@@ -196,7 +196,7 @@ async def get_analytics(
 @router.get("/analytics/export")
 async def export_analytics(
     date: str = None,
-    mode: Literal["counting", "defect"] = "defect",
+    mode: Literal["counting", "inspection"] = "inspection",
 ):
     """23082026-KIET-Xuất Excel gồm sheet Summary và Raw Data theo Analytics mode."""
 
@@ -360,7 +360,7 @@ def get_legacy_analytics():
                 "count": cnt,
                 "color": colors[idx % len(colors)]
             })
-            
+               
         pareto = sorted(pareto, key=lambda x: x["count"], reverse=True)
         
         # 2. Production stats from InspectionRecord

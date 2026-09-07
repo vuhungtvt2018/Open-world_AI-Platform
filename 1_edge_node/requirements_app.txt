@@ -12,3 +12,4 @@ sqlalchemy
 fastapi
 openpyxl
 pypylon
+openpyxl

@@ -32,20 +32,41 @@ def concat_anomaly_crops(anomaly_crop_views: List[np.ndarray], target_h: int = 3
         cols = math.ceil(math.sqrt(num_views))
         rows = math.ceil(num_views / cols)
 
-    avg_aspect_ratio = sum(img.shape[1] / max(1, img.shape[0]) for img in valid_views) / num_views
-    target_w = max(1, int(target_h * avg_aspect_ratio))
+    """
+    25082026 - KHANH - Resize visualization tiles without changing object aspect ratio
+    """
+    resized = []
+    for img in valid_views:
+        src_h, src_w = img.shape[:2]
+        scale = target_h / max(1, src_h)
+        new_w = max(1, int(round(src_w * scale)))
+        interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+        resized.append(cv2.resize(
+            img, (new_w, target_h), interpolation=interpolation
+        ))
 
-    resized = [cv2.resize(img, (target_w, target_h)) for img in valid_views]
-
-    total_slots = rows * cols
-    if len(resized) < total_slots:
-        pad_count = total_slots - len(resized)
-        blank = np.zeros((target_h, target_w, 3), dtype=np.uint8)
-        resized.extend([blank] * pad_count)
+    """
+    25082026 - KHANH - Keep grid columns aligned across rows with variable crop widths
+    """
+    column_widths = []
+    for col in range(cols):
+        widths = [
+            resized[index].shape[1]
+            for index in range(col, num_views, cols)
+        ]
+        column_widths.append(max(widths) if widths else 1)
 
     grid_rows = []
-    for r in range(rows):
-        row_imgs = resized[r * cols : (r + 1) * cols]
-        grid_rows.append(cv2.hconcat(row_imgs))
+    for row in range(rows):
+        row_cells = []
+        for col, cell_w in enumerate(column_widths):
+            index = row * cols + col
+            cell = np.zeros((target_h, cell_w, 3), dtype=np.uint8)
+            if index < num_views:
+                image = resized[index]
+                offset_x = (cell_w - image.shape[1]) // 2
+                cell[:, offset_x:offset_x + image.shape[1]] = image
+            row_cells.append(cell)
+        grid_rows.append(cv2.hconcat(row_cells))
 
     return cv2.vconcat(grid_rows)
