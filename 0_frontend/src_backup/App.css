@@ -1,0 +1,51 @@
+.workspace-app {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background: var(--background);
+  color: var(--text);
+  overflow: hidden;
+}
+
+.workspace-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.view-page-container {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--background);
+  position: relative;
+}
+
+.view-page-container:has(.dashboard-system-info-page) {
+  overflow: hidden;
+}
+
+.view-page-fill {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.view-page-fill > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.tab-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}

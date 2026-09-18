@@ -1,0 +1,228 @@
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', source-code-pro, Menlo, Consolas, monospace;
+
+  --primary: #c9b79c;
+  --primary-hover: #b8a487;
+  --primary-glow: rgba(201, 183, 156, 0.2);
+  --secondary: #123864;
+  --navy-dark: #09234a;
+  --navy-active: #183b67;
+
+  --background: #f5f7fa;
+  --surface: #ffffff;
+  --surface-hover: #edf1f5;
+  --border: #dce3eb;
+  --border-focus: #c9b79c;
+
+  --text: #14233d;
+  --text-muted: #708096;
+  --text-light: #ffffff;
+
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+
+  --status-ok-bg: #eef3f7;
+  --status-ok-text: #123864;
+  --status-ok-border: #dce3eb;
+
+  --status-ng-bg: #f5efe6;
+  --status-ng-text: #8a6d4b;
+  --status-ng-border: #e6d8c3;
+
+  --status-inactive-bg: #edf1f5;
+  --status-inactive-text: #708096;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body, button, input, select, textarea {
+  font-family: var(--font-sans);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--background);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+code {
+  font-family: var(--font-mono);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--primary);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--primary) var(--background);
+}
+
+.glass-panel,
+.panel,
+.card,
+.section,
+.op-stat-card,
+.metric-card,
+.dataset-browser,
+.alerts-list,
+.config-section,
+.help-section,
+.chart-section,
+.traceability-section,
+.reports-section {
+  background-color: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 15px rgba(9, 35, 74, 0.06);
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  color: var(--navy-dark);
+  border: none;
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-hover);
+}
+
+.btn-secondary {
+  background-color: var(--background);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  border-color: var(--primary);
+  color: var(--navy-dark);
+}
+
+.btn-danger {
+  background-color: var(--status-ng-bg);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+select,
+input:not([type="checkbox"]),
+textarea {
+  background-color: var(--background);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+select:focus,
+input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.glow-primary {
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.text-primary {
+  color: var(--navy-dark);
+}
+
+.text-success {
+  color: var(--success);
+}
+
+.text-secondary {
+  color: var(--secondary);
+}
+
+.text-warning {
+  color: var(--warning);
+}
+
+.text-danger {
+  color: var(--danger);
+}
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-switch.active::after {
+  transform: translateX(20px);
+}

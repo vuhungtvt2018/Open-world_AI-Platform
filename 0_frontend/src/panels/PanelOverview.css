@@ -1,0 +1,162 @@
+.panel-overview {
+  height: 100%;
+}
+
+.overview-header {
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 38px;
+}
+
+.overview-tag {
+  background: var(--secondary);
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 10px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.overview-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.overview-body {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* KPI Cards */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.kpi-card {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.kpi-icon-wrapper {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpi-icon-wrapper.blue { background: #eef3f7; color: var(--secondary); }
+.kpi-icon-wrapper.green { background: #eef3f7; color: var(--secondary); }
+.kpi-icon-wrapper.red { background: var(--status-ng-bg); color: var(--status-ng-text); }
+.kpi-icon-wrapper.cyan { background: rgba(201, 183, 156, 0.2); color: var(--navy-dark); }
+.kpi-icon-wrapper.purple { background: #eef3f7; color: var(--secondary); }
+
+.kpi-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.kpi-label {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.kpi-value {
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.text-purple { color: var(--secondary); }
+.text-blue { color: var(--secondary); }
+
+/* Charts & Hardware */
+.overview-charts-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  flex: 1;
+}
+
+.chart-box, .hardware-box {
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--secondary);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chart-container {
+  flex: 1;
+  width: 100%;
+}
+
+.hardware-metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+  flex: 1;
+}
+
+.hw-bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hw-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.hw-progress-track {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hw-progress-bar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.hw-progress-bar.blue { background: var(--secondary); }
+.hw-progress-bar.cyan { background: var(--primary); }
+.hw-progress-bar.green { background: var(--navy-dark); }
+.hw-progress-bar.purple { background: var(--secondary); }

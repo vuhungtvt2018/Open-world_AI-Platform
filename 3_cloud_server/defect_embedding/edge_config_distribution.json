@@ -1,0 +1,7 @@
+{
+    "command": "update_config",
+    "data": {
+        "DEFECT_CLS_SIM_THRESHOLD": 0.1,
+        "DISK_CLEANUP_DAYS": 15.0
+    }
+}

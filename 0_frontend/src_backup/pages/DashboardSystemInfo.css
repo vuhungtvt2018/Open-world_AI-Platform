@@ -1,0 +1,119 @@
+.dashboard-system-info-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: var(--background);
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dashboard-page-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  padding: 10px 24px;
+  background: var(--navy-dark);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-shadow: 0 4px 16px rgba(9, 35, 74, 0.35);
+  flex-wrap: wrap;
+}
+
+.page-header-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-page-header h1 {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin: 0;
+  white-space: nowrap;
+}
+
+.dashboard-page-header .mode-tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: rgba(201, 183, 156, 0.2);
+  border: 1px solid var(--primary);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+.section-nav-pills {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  overflow-x: auto;
+}
+
+.nav-pill {
+  background: transparent;
+  border: none;
+  color: #a9b9cd;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+}
+
+.nav-pill:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.nav-pill.active {
+  background: var(--primary);
+  color: var(--navy-dark);
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(201, 183, 156, 0.4);
+}
+
+.dashboard-section-block {
+  width: 100%;
+  box-sizing: border-box;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  padding: 12px 0 24px 0;
+  scroll-margin-top: 56px;
+}
+
+.dashboard-section-block:last-child,
+#sec-5-production {
+  border-bottom: none;
+  padding-bottom: 48px;
+}
+
+.dashboard-section-block .dashboard-container,
+.dashboard-section-block .analytics-container,
+.dashboard-section-block .model-op-container,
+.dashboard-section-block .dataset-container,
+.dashboard-section-block .production-container {
+  height: auto;
+  overflow: visible;
+  padding: 16px 24px 8px;
+}
+
+.dashboard-section-block .header-info h1,
+.dashboard-section-block .dashboard-header h1 {
+  color: var(--navy-dark);
+}

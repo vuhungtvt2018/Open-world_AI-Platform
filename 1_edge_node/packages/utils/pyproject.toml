@@ -1,0 +1,14 @@
+[project]
+name = "utils"
+version = "0.1.0"
+description = "Utility functions for vision AI platform"
+requires-python = ">=3.10"
+dependencies = [
+    "core",
+    "numpy",
+    "opencv-python",
+    "torch"
+]
+
+[tool.uv.sources]
+core = { workspace = true }

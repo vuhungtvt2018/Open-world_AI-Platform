@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings
+SQLAlchemy
+psycopg2-binary
+pgvector
+torch
+torchvision
+Pillow
+timm
+opencv-python
+python-multipart

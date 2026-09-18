@@ -1,0 +1,410 @@
+/* EdgeDashboard.css */
+
+.edge-hmi-container {
+  width: 100vw;
+  height: 100vh;
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  background-color: #0b0f19; /* Deep dark background */
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.hmi-header {
+  height: 80px;
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+}
+
+.hmi-brand {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.hmi-brand h1 {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  margin: 0;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hmi-node-id {
+  font-family: var(--font-mono, monospace);
+  font-size: 14px;
+  background: rgba(37, 99, 235, 0.2);
+  color: #60a5fa;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(37, 99, 235, 0.4);
+}
+
+.hmi-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.hmi-time {
+  font-size: 24px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 2px;
+}
+
+.hmi-conn-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(34, 197, 94, 0.1);
+  padding: 8px 16px;
+  border-radius: 24px;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.status-dot-pulse-green {
+  width: 12px;
+  height: 12px;
+  background: #22c55e;
+  border-radius: 50%;
+  position: relative;
+}
+
+.status-dot-pulse-green::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border: 2px solid #22c55e;
+  border-radius: 50%;
+  animation: hmi-ripple 2s infinite;
+}
+
+@keyframes hmi-ripple {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+.hmi-exit-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid #334155;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.hmi-exit-btn:hover {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+}
+
+.hmi-content-area {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  height: calc(100vh - 80px - 80px); /* Subtract header and bottom nav */
+}
+
+.hmi-main-grid {
+  display: grid;
+  grid-template-columns: 2.5fr 1fr;
+  gap: 24px;
+  padding: 24px;
+  height: 100%;
+}
+
+.hmi-embedded-view {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  background: var(--background); /* Give it the standard app background */
+}
+
+/* Override container paddings for embedded views to fit HMI screen */
+.hmi-embedded-view > div {
+  min-height: 100%;
+}
+
+
+/* Video Section */
+.hmi-video-section {
+  background: #0f172a;
+  border-radius: 24px;
+  border: 1px solid #334155;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hmi-video-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hmi-live-feed {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.hmi-standby, .hmi-fallback {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  text-align: center;
+}
+
+.hmi-standby h2 {
+  font-size: 32px;
+  margin-bottom: 8px;
+  color: #94a3b8;
+}
+
+.hmi-fallback h3 {
+  font-size: 28px;
+  color: #ef4444;
+  margin-bottom: 8px;
+}
+
+.hmi-result-overlay {
+  position: absolute;
+  top: 32px;
+  right: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 180px;
+  height: 180px;
+  border-radius: 24px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(10px);
+  border: 4px solid;
+  animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes popIn {
+  0% { transform: scale(0.5); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.hmi-result-overlay span {
+  font-size: 48px;
+  font-weight: 900;
+  margin-top: 8px;
+  letter-spacing: 2px;
+}
+
+.result-ok {
+  border-color: #22c55e;
+  color: #4ade80;
+  box-shadow: 0 0 40px rgba(34, 197, 94, 0.3);
+}
+
+.result-ng {
+  border-color: #ef4444;
+  color: #f87171;
+  box-shadow: 0 0 40px rgba(239, 68, 68, 0.4);
+}
+
+/* Control Section */
+.hmi-control-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.hmi-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hmi-btn {
+  height: 120px;
+  border-radius: 20px;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: all 0.2s;
+  box-shadow: 0 8px 0 rgba(0,0,0,0.2);
+}
+
+.hmi-btn:active {
+  transform: translateY(8px);
+  box-shadow: 0 0 0 rgba(0,0,0,0.2);
+}
+
+.hmi-btn-start {
+  background: linear-gradient(180deg, #3b82f6 0%, #2563eb 100%);
+  color: white;
+}
+
+.hmi-btn-start.active {
+  background: linear-gradient(180deg, #10b981 0%, #059669 100%);
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.4);
+}
+
+.hmi-btn-stop {
+  background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+  color: #94a3b8;
+}
+
+.hmi-btn-stop.active {
+  background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+  color: white;
+  box-shadow: 0 0 30px rgba(239, 68, 68, 0.4);
+}
+
+.hmi-stats {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hmi-stat-card {
+  flex: 1;
+  border-radius: 20px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.bg-glass {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.bg-glass-ok {
+  background: rgba(34, 197, 94, 0.05);
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.bg-glass-ng {
+  background: rgba(239, 68, 68, 0.05);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.hmi-stat-card h3 {
+  font-size: 16px;
+  color: #94a3b8;
+  font-weight: 700;
+  letter-spacing: 1px;
+  margin: 0 0 8px 0;
+}
+
+.hmi-stat-value {
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.hmi-yield-card {
+  background: #0f172a;
+  border-radius: 20px;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #334155;
+}
+
+.hmi-yield-card h3 {
+  font-size: 18px;
+  color: #94a3b8;
+  margin: 0;
+}
+
+.hmi-yield-value {
+  font-size: 36px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+/* Bottom Navigation */
+.hmi-bottom-nav {
+  height: 80px;
+  background: rgba(15, 23, 42, 0.95);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.hmi-nav-btn {
+  flex: 1;
+  max-width: 240px;
+  height: 64px;
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.hmi-nav-btn span {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.hmi-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #94a3b8;
+}
+
+.hmi-nav-btn.active {
+  background: rgba(37, 99, 235, 0.15);
+  color: #60a5fa;
+  border-bottom: 3px solid #3b82f6;
+  border-bottom-left-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+

@@ -1,0 +1,30 @@
+[project]
+name = "vision-ai-platform"
+version = "0.1.0"
+description = "Vision AI Platform Monorepo"
+requires-python = ">=3.10"
+dependencies = [
+    "core",
+    "utils",
+    "camera",
+    "ai",
+    "workflow",
+    "services",
+    "edge-agent"
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/*",
+    "services",
+    "apps/*"
+]
+
+[tool.uv.sources]
+core = { workspace = true }
+utils = { workspace = true }
+camera = { workspace = true }
+ai = { workspace = true }
+workflow = { workspace = true }
+services = { workspace = true }
+edge-agent = { workspace = true }

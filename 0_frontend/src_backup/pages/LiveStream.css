@@ -1,0 +1,621 @@
+.livestream-container {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.header-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.stream-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface);
+  padding: 8px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stream-layout {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 24px;
+}
+
+.stream-main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.active-stream-window {
+  background: var(--surface);
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.stream-viewport {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #000;
+}
+
+.stream-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.stream-watermark {
+  position: absolute;
+  top: 24px;
+  left: 24px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.live-badge {
+  background: #f43f5e;
+  color: white;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.cam-name {
+  color: white;
+  font-size: 14px;
+  font-weight: 700;
+  text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+/* AI Overlay */
+.ai-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.detection-box {
+  position: absolute;
+  border: 2px solid #10b981;
+  background: rgba(16, 185, 129, 0.1);
+  border-radius: 4px;
+}
+
+.detection-box.ng {
+  border-color: #f43f5e;
+  background: rgba(244, 63, 94, 0.1);
+}
+
+.box-label {
+  position: absolute;
+  top: -24px;
+  left: -2px;
+  background: #10b981;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 4px 4px 0 0;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.detection-box.ng .box-label {
+  background: #f43f5e;
+}
+
+.stream-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20px 24px;
+  background: linear-gradient(to top, rgba(0,0,0,0.8), transparent);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.stream-viewport:hover .stream-controls {
+  opacity: 1;
+}
+
+.control-group {
+  display: flex;
+  gap: 12px;
+}
+
+.control-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 10px;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.control-btn.recording {
+  background: rgba(244, 63, 94, 0.2);
+  border-color: #f43f5e;
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 10px;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.stream-metadata {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  padding: 20px 24px;
+  gap: 24px;
+}
+
+.meta-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.meta-item .label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.meta-item .value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Stream Grid */
+.stream-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.grid-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.grid-item:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+}
+
+.grid-item.active {
+  border-color: var(--primary);
+  background: var(--primary-glow);
+}
+
+.grid-preview {
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  position: relative;
+}
+
+.grid-status-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(0,0,0,0.6);
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.grid-status-badge span {
+  color: white;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.status-dot.online { background: #10b981; }
+
+.grid-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.grid-info .name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.grid-info .meta {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Sidebar */
+.stream-sidebar {
+  background: var(--surface);
+  border-radius: 24px;
+  border: 1px solid var(--border);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header-sm {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.sidebar-header-sm h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.event-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+}
+
+.timeline-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--background);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.timeline-item.ng {
+  border-color: var(--danger);
+  background: rgba(244, 63, 94, 0.05);
+}
+
+.timeline-item .time {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.timeline-item .desc {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.timeline-item .desc strong {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.timeline-item .desc span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.view-history-btn {
+  margin-top: 24px;
+  padding: 12px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.view-history-btn:hover {
+  background: var(--background);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+/* 19082026 - KIET - Bổ sung trạng thái và form cấu hình API nhưng giữ layout Live Stream cũ. */
+.camera-feedback {
+  padding: 10px 14px;
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  border-radius: 10px;
+  background: rgba(37, 99, 235, 0.08);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.stream-empty-state,
+.sidebar-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.stream-empty-state span {
+  max-width: 420px;
+  font-size: 12px;
+}
+
+.status-dot.disconnected { background: #94a3b8; }
+.status-dot.connecting { background: #f59e0b; }
+.status-dot.error { background: #f43f5e; }
+
+.status-text.online { color: #10b981; }
+.status-text.connecting { color: #f59e0b; }
+.status-text.error { color: #f43f5e; }
+
+.control-btn:disabled,
+.icon-btn:disabled,
+.camera-primary-btn:disabled,
+.camera-secondary-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.empty-camera-card {
+  min-height: 150px;
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.stream-sidebar {
+  max-height: calc(100vh - 170px);
+  overflow-y: auto;
+}
+
+.sidebar-header-sm h3 {
+  flex: 1;
+}
+
+.sidebar-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.camera-config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.camera-config-form label {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.camera-config-form input,
+.camera-config-form select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.camera-config-form input:focus,
+.camera-config-form select:focus {
+  border-color: var(--primary);
+}
+
+.camera-primary-btn,
+.camera-secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.camera-primary-btn {
+  border: 1px solid var(--primary);
+  background: var(--primary);
+  color: white;
+}
+
+.camera-secondary-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.camera-form-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.camera-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* 23082026-KIET-Hiển thị nút Camera Hub giống nút Sync Model Hub */
+.camera-hub-sync-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.camera-hub-sync-btn:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+}
+
+/* 23082026-KIET-Áp dụng hiệu ứng hover xanh của nút Sync cho riêng nút Run All */
+.camera-run-all-btn {
+  transition: all 0.2s ease;
+}
+
+.camera-run-all-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+  box-shadow: 0 0 18px var(--primary-glow);
+}
+
+.camera-hub-sync-btn:disabled,
+.camera-hub-sync-btn:hover:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  transform: none;
+  filter: none;
+}
+
+/* 23082026-KIET-Hiển thị trạng thái đang đồng bộ camera với Camera Hub */
+.camera-sync-spinner {
+  animation: camera-sync-spin 0.9s linear infinite;
+}
+
+@keyframes camera-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 23082026-KIET-Hiển thị popup loading và kết quả Camera Hub độc lập với trang Model */
+.camera-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.camera-sync-popup {
+  width: 100%;
+  max-width: 500px;
+  box-sizing: border-box;
+  background: var(--surface) !important;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 36px 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  animation: camera-sync-modal-scale 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.camera-sync-popup h3 {
+  font-size: 18px;
+}
+
+.camera-sync-popup p {
+  max-width: 320px;
+  font-size: 13px;
+}
+
+/* 23082026-KIET-Căn giữa vị trí nút và nội dung OK trong popup Camera Sync */
+.camera-sync-popup .btn-primary {
+  min-width: 96px;
+  margin: 8px auto 0;
+  align-self: center;
+  justify-content: center;
+}
+
+@keyframes camera-sync-modal-scale {
+  from {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}

@@ -1,0 +1,18 @@
+# ==========================================
+# MAIN SERVER CONFIG (DEFECT EMBEDDING)
+# ==========================================
+PROJECT_PATH: "\\demo_bulong\\3_cloud_server\\defect_embedding"
+
+# FAST API CONFIG
+IP: "10.32.11.97"
+PORT: 8031
+
+# DATABASE CONFIG
+DATABASE_URL: "postgresql+psycopg2://postgres:999@localhost:5432/visual_inspection_bulong"
+DEVICE: "cpu"
+MODEL_NAME: "vit_small_patch14_dinov2.lvd142m"
+EMBEDDING_DIM: 384
+TABLE_NAME: "qc_productphotolibrary"
+ENABLE_IVFFLAT_INDEX: true
+IVFFLAT_LISTS: 100
+IVFFLAT_DISTANCE: "cosine"

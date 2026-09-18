@@ -1,0 +1,138 @@
+.panel-splitter {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  transition: background-color 0.15s ease;
+  flex-shrink: 0;
+}
+
+/* Vertical Splitter (Between columns) */
+.splitter-vertical {
+  width: 7px;
+  margin: 0 -1px;
+  cursor: col-resize;
+}
+
+.splitter-vertical:hover,
+.splitter-vertical.dragging {
+  background: var(--surface-hover);
+}
+
+.splitter-vertical .splitter-handle {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.splitter-vertical .splitter-line {
+  width: 2px;
+  height: 100%;
+  background: var(--border);
+  transition: background 0.15s ease, width 0.15s ease;
+}
+
+.splitter-vertical:hover .splitter-line,
+.splitter-vertical.dragging .splitter-line {
+  background: var(--secondary);
+  width: 3px;
+  box-shadow: 0 0 8px rgba(18, 56, 100, 0.4);
+}
+
+.splitter-vertical .splitter-grip {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.splitter-vertical:hover .splitter-grip,
+.splitter-vertical.dragging .splitter-grip {
+  opacity: 1;
+  background: var(--secondary);
+  border-color: var(--secondary);
+}
+
+/* Horizontal Splitter (Between rows) */
+.splitter-horizontal {
+  height: 7px;
+  margin: -1px 0;
+  width: 100%;
+  cursor: row-resize;
+}
+
+.splitter-horizontal:hover,
+.splitter-horizontal.dragging {
+  background: var(--surface-hover);
+}
+
+.splitter-horizontal .splitter-handle {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.splitter-horizontal .splitter-line {
+  height: 2px;
+  width: 100%;
+  background: var(--border);
+  transition: background 0.15s ease, height 0.15s ease;
+}
+
+.splitter-horizontal:hover .splitter-line,
+.splitter-horizontal.dragging .splitter-line {
+  background: var(--secondary);
+  height: 3px;
+  box-shadow: 0 0 8px rgba(18, 56, 100, 0.4);
+}
+
+.splitter-horizontal .splitter-grip {
+  position: absolute;
+  display: flex;
+  flex-direction: row;
+  gap: 3px;
+  padding: 2px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.splitter-horizontal:hover .splitter-grip,
+.splitter-horizontal.dragging .splitter-grip {
+  opacity: 1;
+  background: var(--secondary);
+  border-color: var(--secondary);
+}
+
+/* Grip dots */
+.splitter-grip .dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background-color: var(--text-muted);
+  transition: background-color 0.15s ease;
+}
+
+.splitter-vertical:hover .splitter-grip .dot,
+.splitter-vertical.dragging .splitter-grip .dot,
+.splitter-horizontal:hover .splitter-grip .dot,
+.splitter-horizontal.dragging .splitter-grip .dot {
+  background-color: #ffffff;
+}
