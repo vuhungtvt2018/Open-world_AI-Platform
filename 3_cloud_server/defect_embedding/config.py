@@ -28,7 +28,6 @@ class Settings(BaseSettings):
     IVFFLAT_DISTANCE: str = Field(default="cosine")
 
     # FastAPI Config (Sakura style)
-    PROJECT_PATH: str = Field(default="")
     IP: str = Field(default="0.0.0.0")
     PORT: int = Field(default=8031)
 
@@ -36,7 +35,7 @@ class Settings(BaseSettings):
 
     @classmethod
     def load_settings(cls) -> "Settings":
-        yaml_path = os.path.join(os.path.dirname(__file__), "main_server_config.yaml")
+        yaml_path = os.path.join(os.path.dirname(__file__), "config.yaml")
         if os.path.exists(yaml_path):
             try:
                 with open(yaml_path, "r", encoding="utf-8") as f:

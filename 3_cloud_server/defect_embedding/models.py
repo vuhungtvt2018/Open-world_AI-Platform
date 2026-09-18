@@ -79,17 +79,23 @@ class InspectionRecord(Base):
     latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
     created_at: Mapped[str] = mapped_column(DateTime, server_default=func.now())
     
-    # Quan hệ 1-N với BoltObject
-    objects: Mapped[List["BoltObject"]] = relationship(
-        "BoltObject", back_populates="record", cascade="all, delete-orphan"
+    # Quan hệ 1-N với InspectionObject
+    """
+    17092026 - KHAI - Change from BoltObject to InspectionObject for generalization
+    """
+    objects: Mapped[List["InspectionObject"]] = relationship(
+        "InspectionObject", back_populates="record", cascade="all, delete-orphan"
     )
 
-class BoltObject(Base):
-    __tablename__ = "bolt_objects"
+"""
+17092026 - KHAI - Change from BoltObject to InspectionObject for generalization
+"""
+class InspectionObject(Base):
+    __tablename__ = "inspection_objects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     record_id: Mapped[int] = mapped_column(ForeignKey("inspection_records.id"), index=True)
-    edge_bolt_id: Mapped[int] = mapped_column(Integer, nullable=True) # ID gốc của bolt dưới Edge
+    edge_object_id: Mapped[int] = mapped_column(Integer, nullable=True) # ID gốc của object dưới Edge
     object_index: Mapped[int] = mapped_column(Integer)
     bbox: Mapped[str] = mapped_column(String(255))
     score: Mapped[float] = mapped_column(Float, default=0.0)
@@ -101,18 +107,24 @@ class BoltObject(Base):
     
     # Quan hệ 1-N với AnomalyDetail
     anomalies: Mapped[List["AnomalyDetail"]] = relationship(
-        "AnomalyDetail", back_populates="bolt", cascade="all, delete-orphan"
+        "AnomalyDetail", back_populates="inspect_object", cascade="all, delete-orphan"
     )
 
 class AnomalyDetail(Base):
     __tablename__ = "anomaly_details"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    bolt_id: Mapped[int] = mapped_column(ForeignKey("bolt_objects.id"), index=True)
+    """
+    17092026 - KHAI - Change name to object_id instead of bolt_id
+    """
+    object_id: Mapped[int] = mapped_column(ForeignKey("inspection_objects.id"), index=True)
     edge_anomaly_id: Mapped[int] = mapped_column(Integer, nullable=True) # ID gốc của anomaly dưới Edge
     bbox_full: Mapped[str] = mapped_column(String(255))
     bbox_in_object_crop: Mapped[str] = mapped_column(String(255))
     defect_class: Mapped[str] = mapped_column(String(100), nullable=True)
     similarity: Mapped[float] = mapped_column(Float, nullable=True)
     
-    bolt: Mapped["BoltObject"] = relationship("BoltObject", back_populates="anomalies")
+    """
+    17092026 - KHAI - Change from bolt to inspect_object
+    """
+    inspect_object: Mapped["InspectionObject"] = relationship("InspectionObject", back_populates="anomalies")

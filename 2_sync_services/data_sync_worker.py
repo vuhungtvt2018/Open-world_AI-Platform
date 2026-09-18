@@ -55,12 +55,17 @@ def resolve_capture_path(image_path):
     matches = glob.glob(os.path.join(CAPTURE_ROOT, "**", os.path.basename(image_path)), recursive=True)
     return matches[0] if matches else None
 
-def get_last_sync_time(cursor, key="last_inspection_sync_time"):
+"""
+17092026 - KHAI - Pass conn instead of cursor into functions querying from DB
+"""
+def get_last_sync_time(conn, key="last_inspection_sync_time"):
+    cursor = conn.cursor()
     cursor.execute("SELECT value FROM sync_states WHERE key = ?", (key,))
     row = cursor.fetchone()
     return row[0] if row else None
 
-def set_last_sync_time(conn, cursor, value, key="last_inspection_sync_time"):
+def set_last_sync_time(conn, value, key="last_inspection_sync_time"):
+    cursor = conn.cursor()
     cursor.execute("SELECT value FROM sync_states WHERE key = ?", (key,))
     if cursor.fetchone():
         cursor.execute("UPDATE sync_states SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE key = ?", (value, key))
@@ -69,8 +74,12 @@ def set_last_sync_time(conn, cursor, value, key="last_inspection_sync_time"):
     conn.commit()
 
 
+"""
+17092026 - KHAI - Pass conn instead of cursor into functions querying from DB
+"""
 # 23082026-KIET-Đảm bảo worker độc lập vẫn nâng cấp được cột camera sync trên Edge DB cũ
-def ensure_camera_sync_columns(conn, cursor):
+def ensure_camera_sync_columns(conn):
+    cursor = conn.cursor()
     existing_columns = {
         row[1]
         for row in cursor.execute("PRAGMA table_info(camera_configs)").fetchall()
@@ -89,17 +98,21 @@ def ensure_camera_sync_columns(conn, cursor):
     conn.commit()
 
 
+"""
+17092026 - KHAI - Pass conn instead of cursor into functions querying from DB
+"""
 # 23082026-KIET-Tự động push camera config đang dirty từ Edge lên Camera Hub
-def sync_camera_configs(conn, cursor):
+def sync_camera_configs(conn):
     camera_sync_url = cfg.get("API_SYNC_CAMERA_UP_URL")
     if not cfg.get("API_SYNC_ENABLE") or not camera_sync_url:
         return
 
+    cursor = conn.cursor()
     cursor.execute(
         """
         SELECT camera_id, name, source_type, source_url, serial_number,
-               assigned_task, enabled, width, height, fps, created_at, updated_at,
-               cloud_revision
+            assigned_task, enabled, width, height, fps, created_at, updated_at,
+            cloud_revision
         FROM camera_configs
         WHERE sync_dirty = 1
         ORDER BY camera_id ASC
@@ -152,7 +165,7 @@ def sync_camera_configs(conn, cursor):
                 cloud_revision = ?,
                 last_synced_at = CURRENT_TIMESTAMP
             WHERE camera_id = ?
-              AND (updated_at = ? OR (? IS NULL AND updated_at IS NULL))
+            AND (updated_at = ? OR (? IS NULL AND updated_at IS NULL))
             """,
             (
                 int(camera.get("revision", 0)),
@@ -167,6 +180,9 @@ def sync_camera_configs(conn, cursor):
         f"cua Edge Node {EDGE_NODE_ID}."
     )
 
+"""
+17092026 - KHAI - Pass conn instead of cursor into functions querying from DB
+"""
 def sync_job():
     print(f"[SYNC DAEMON] Bắt đầu tiến trình độc lập. Quét CSDL tại: {DB_PATH}")
     while True:
@@ -179,46 +195,61 @@ def sync_job():
             cursor = conn.cursor()
             
             # Đảm bảo bảng sync_states tồn tại
+            """
+            17092026 - KHAI - Refactor the SQL query
+            """
             cursor.execute('''CREATE TABLE IF NOT EXISTS sync_states (
-                                key VARCHAR(100) PRIMARY KEY,
-                                value VARCHAR(255),
-                                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                              )''')
+                key VARCHAR(100) PRIMARY KEY,
+                value VARCHAR(255),
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )''')
             
             # Đảm bảo bảng qc_product_photo_library tồn tại
+            """
+            17092026 - KHAI - Refactor the SQL query
+            """
             cursor.execute('''CREATE TABLE IF NOT EXISTS qc_product_photo_library (
-                                ID INTEGER PRIMARY KEY,
-                                SM_ID VARCHAR(50) UNIQUE,
-                                ItemCode VARCHAR(100),
-                                ImageName VARCHAR(255),
-                                ImageType INTEGER,
-                                ErrorDetail VARCHAR(255),
-                                Insert_PIC VARCHAR(100),
-                                Insert_Date DATETIME,
-                                Update_PIC VARCHAR(100),
-                                Update_Date DATETIME
-                              )''')
+                ID INTEGER PRIMARY KEY,
+                SM_ID VARCHAR(50) UNIQUE,
+                ItemCode VARCHAR(100),
+                ImageName VARCHAR(255),
+                ImageType INTEGER,
+                ErrorDetail VARCHAR(255),
+                Insert_PIC VARCHAR(100),
+                Insert_Date DATETIME,
+                Update_PIC VARCHAR(100),
+                Update_Date DATETIME
+            )''')
             conn.commit()
 
             # 23082026-KIET-Nâng cấp schema camera trước khi worker đọc trạng thái dirty
-            ensure_camera_sync_columns(conn, cursor)
+            ensure_camera_sync_columns(conn)
 
             # 23082026-KIET-Gửi camera config sau khi các bảng Edge đã sẵn sàng
             try:
-                sync_camera_configs(conn, cursor)
+                sync_camera_configs(conn)
             except sqlite3.OperationalError as e:
                 if "no such table: camera_configs" not in str(e):
                     print(f"[SYNC CAMERA UP] Loi database: {e}")
             except Exception as e:
                 print(f"[SYNC CAMERA UP] Loi dong bo camera: {e}")
             
-            last_sync = get_last_sync_time(cursor)
+            last_sync = get_last_sync_time(conn)
             
             # Fetch records
+            """
+            17092026 - KHAI - Refactor the SQL query for syncing
+            """
+            sync_query = """
+                SELECT id, timestamp, original_image, ng_detected, latency_ms, created_at
+                FROM inspection_records
+            """
+            sync_params = []
             if last_sync:
-                cursor.execute("SELECT id, timestamp, original_image, ng_detected, latency_ms, created_at FROM inspection_records WHERE created_at > ? ORDER BY created_at ASC LIMIT 50", (last_sync,))
-            else:
-                cursor.execute("SELECT id, timestamp, original_image, ng_detected, latency_ms, created_at FROM inspection_records ORDER BY created_at ASC LIMIT 50")
+                sync_query += " WHERE created_at > ?"
+                sync_params.append(last_sync)
+            sync_query += " ORDER BY created_at ASC LIMIT 50"
+            cursor.execute(sync_query, sync_params)
             
             records = cursor.fetchall()
             
@@ -226,7 +257,14 @@ def sync_job():
                 rec_id, rec_ts, rec_img, rec_ng_detected, rec_latency, rec_created = record
                 
                 # 19082026 - KHANH - Doc object tu bang inspection_objects theo schema SQLite hien tai.
-                cursor.execute("SELECT id, object_index, bbox, score, is_ng, overlap_ratio, crop_image FROM inspection_objects WHERE record_id = ?", (rec_id,))
+                """
+                17092026 - KHAI - Refactor the SQL query
+                """
+                cursor.execute("""
+                    SELECT id, object_index, bbox, score, is_ng, overlap_ratio, crop_image
+                    FROM inspection_objects
+                    WHERE record_id = ?
+                """, (rec_id,))
                 objects = cursor.fetchall()
                 
                 object_details = []
@@ -234,7 +272,14 @@ def sync_job():
                     obj_id, object_index, bbox, score, is_ng, overlap_ratio, crop_image = obj
                     
                     # 19082026 - KHANH - Doc anomaly bang khoa object_id theo schema SQLite hien tai.
-                    cursor.execute("SELECT id, bbox_full, bbox_in_object_crop, defect_class, similarity FROM anomaly_details WHERE object_id = ?", (obj_id,))
+                    """
+                    17092026 - KHAI - Refactor the SQL query
+                    """
+                    cursor.execute("""
+                        SELECT id, bbox_full, bbox_in_object_crop, defect_class, similarity
+                        FROM anomaly_details
+                        WHERE object_id = ?
+                    """, (obj_id,))
                     anomalies = cursor.fetchall()
                     
                     anomaly_details = []
@@ -258,7 +303,7 @@ def sync_job():
                         "crop_image": crop_image,
                         "anomalies": anomaly_details
                     })
-                    
+                
                 payload = {
                     "edge_node_id": EDGE_NODE_ID,
                     "record_id": rec_id,
@@ -272,12 +317,12 @@ def sync_job():
                 
                 if cfg.get("API_SYNC_ENABLE") and cfg.get("API_SYNC_UP_URL"):
                     try:
-                        # Đính kèm hình ảnh
+                        # Đính kèm hình ảnh
                         files = None
                         # 19082026 - KHANH - Tim duong dan anh thuc te thay vi su dung ten file tu database.
                         resolved_image = resolve_capture_path(rec_img)
                         if resolved_image:
-                            # Mở file ở chế độ đọc binary
+                            # Mở file ở chế độ đọc binary
                             files = {'file': (os.path.basename(resolved_image), open(resolved_image, 'rb'), 'image/jpeg')}
                             
                         print(f"[SYNC WORKER] Pushing record {rec_id} to Server...")
@@ -289,7 +334,7 @@ def sync_job():
                             proxies={"http": None, "https": None}
                         )
                         if files:
-                            files['file'][1].close() # Đóng file
+                            files['file'][1].close() # Đóng file
                             
                         # 19082026 - KHANH - Chi chap nhan dong bo khi HTTP va payload deu xac nhan thanh cong.
                         r.raise_for_status()
@@ -304,9 +349,9 @@ def sync_job():
                         raise e # Dừng để retry sau
                         
                 # 19082026 - KHANH - Chi cap nhat moc sync sau khi Cloud Server xac nhan thanh cong.
-                    set_last_sync_time(conn, cursor, rec_created)
+                set_last_sync_time(conn, rec_created)
                 
-            # Đồng bộ hướng xuống (Server -> Edge) (Cấu hình)
+            # Đồng bộ hướng xuống (Server -> Edge) (Cấu hình)
             if cfg.get("API_SYNC_ENABLE") and cfg.get("API_SYNC_DOWN_URL"):
                 try:
                     r_down = requests.get(cfg["API_SYNC_DOWN_URL"], timeout=5, proxies={"http": None, "https": None})
@@ -333,7 +378,7 @@ def sync_job():
             # Đồng bộ Thư viện mẫu (Server -> Edge)
             if cfg.get("API_SYNC_ENABLE") and cfg.get("API_SYNC_LIBRARY_DOWN_URL"):
                 try:
-                    last_lib_sync = get_last_sync_time(cursor, "last_library_sync_time")
+                    last_lib_sync = get_last_sync_time(conn, "last_library_sync_time")
                     url = cfg["API_SYNC_LIBRARY_DOWN_URL"]
                     if last_lib_sync:
                         url += f"?last_update={last_lib_sync}"
@@ -389,7 +434,7 @@ def sync_job():
                                 max_update = u_date
                                 
                         if records:
-                            set_last_sync_time(conn, cursor, max_update, "last_library_sync_time")
+                            set_last_sync_time(conn, max_update, "last_library_sync_time")
                             print(f"[SYNC DOWN] Da cap nhat {len(records)} ban ghi thu vien mau.")
                 except Exception as e:
                     print(f"[SYNC DOWN] Loi dong bo thu vien: {e}")

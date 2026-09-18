@@ -4,8 +4,7 @@ from sqlalchemy import select, text, bindparam, func, inspect
 from sqlalchemy.orm import Session
 from pgvector.sqlalchemy import Vector
 from config import settings
-from typing import Optional, List, Literal
-from pydantic import BaseModel, Field
+from typing import Optional, List
 from uuid import uuid4
 from datetime import datetime
 import os, io, json
@@ -17,12 +16,17 @@ from models import (
     CloudAIModel,
     CloudCameraConfig,
     InspectionRecord,
-    BoltObject,
+    InspectionObject,
     AnomalyDetail,
 )
+"""
+18092026 - KHAI - Move SyncModelRequest, SyncModelsPayload, SyncCameraRequest, 
+SyncCamerasPayload to schemas.py; combine PhotoBase, PhotoCreate and PhotoRead 
+into PhotoInfo
+"""
 from schemas import (
-    PhotoCreate, PhotoRead, PhotoUpdateErrorDetail,
-    SearchRequestByImage, SearchResultItem
+    PhotoInfo, UpdateErrorDetailPayload, SearchResultItem,
+    SyncModelsPayload, SyncCamerasPayload,
 )
 from embedding import embed_pil
 from PIL import Image
@@ -133,7 +137,7 @@ def _gen_filename(ext: str = ".jpg") -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"{ts}_{uuid4().hex[:16]}{ext}"
 
-@app.post("/photos", response_model=PhotoRead)
+@app.post("/photos", response_model=PhotoInfo)
 async def create_photo(
     SM_ID: Optional[str] = Form(None),
     ItemCode: Optional[str] = Form(None),
@@ -180,25 +184,25 @@ async def create_photo(
     db.add(rec)
     db.commit()
     db.refresh(rec)
-    return PhotoRead.model_validate(rec)
+    return PhotoInfo.model_validate(rec)
 
-@app.get("/photos/{photo_id}", response_model=PhotoRead)
+@app.get("/photos/{photo_id}", response_model=PhotoInfo)
 def get_photo(photo_id: int, db: Session = Depends(get_db)):
     rec = db.get(QCProductPhotoLibrary, photo_id)
     if not rec:
         raise HTTPException(status_code=404, detail="Không tìm thấy")
-    return PhotoRead.model_validate(rec)
+    return PhotoInfo.model_validate(rec)
 
-@app.get("/photos/by-smid/{sm_id}", response_model=PhotoRead)
+@app.get("/photos/by-smid/{sm_id}", response_model=PhotoInfo)
 def get_photo_by_smid(sm_id: str, db: Session = Depends(get_db)):
     rec = db.execute(
         select(QCProductPhotoLibrary).where(QCProductPhotoLibrary.SM_ID == sm_id)
     ).scalar_one_or_none()
     if not rec:
         raise HTTPException(status_code=404, detail="Không tìm thấy")
-    return PhotoRead.model_validate(rec)
+    return PhotoInfo.model_validate(rec)
 
-@app.get("/photos", response_model=List[PhotoRead])
+@app.get("/photos", response_model=List[PhotoInfo])
 def list_photos(
     item_code: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
@@ -212,12 +216,12 @@ def list_photos(
         ).offset(skip).limit(limit)
 
     rows = db.execute(stmt).scalars().all()
-    return [PhotoRead.model_validate(r) for r in rows]
+    return [PhotoInfo.model_validate(r) for r in rows]
 
-@app.put("/photos/{photo_id}/error-detail", response_model=PhotoRead)
+@app.put("/photos/{photo_id}/error-detail", response_model=PhotoInfo)
 def update_error_detail(
     photo_id: int,
-    payload: PhotoUpdateErrorDetail,
+    payload: UpdateErrorDetailPayload,
     db: Session = Depends(get_db),
 ):
     rec = db.get(QCProductPhotoLibrary, photo_id)
@@ -228,12 +232,12 @@ def update_error_detail(
     db.add(rec)
     db.commit()
     db.refresh(rec)
-    return PhotoRead.model_validate(rec)
+    return PhotoInfo.model_validate(rec)
 
-@app.put("/photos/by-smid/{sm_id}/error-detail", response_model=PhotoRead)
+@app.put("/photos/by-smid/{sm_id}/error-detail", response_model=PhotoInfo)
 def update_error_detail_by_smid(
     sm_id: str,
-    payload: PhotoUpdateErrorDetail,
+    payload: UpdateErrorDetailPayload,
     db: Session = Depends(get_db),
 ):
     rec = db.execute(
@@ -246,7 +250,7 @@ def update_error_detail_by_smid(
     db.add(rec)
     db.commit()
     db.refresh(rec)
-    return PhotoRead.model_validate(rec)
+    return PhotoInfo.model_validate(rec)
 
 @app.delete("/photos/{photo_id}")
 def delete_photo(photo_id: int, db: Session = Depends(get_db)):
@@ -474,7 +478,7 @@ async def sync_up(
         
         # Parse objects
         for obj_data in data.get("objects", []):
-            bolt = BoltObject(
+            bolt = InspectionObject(
                 edge_bolt_id=obj_data.get("id"),
                 object_index=obj_data.get("object_index", 0),
                 bbox=obj_data.get("bbox", ""),
@@ -589,20 +593,6 @@ def get_latest_models(db: Session = Depends(get_db)):
         ]
     }
 
-class SyncModelRequest(BaseModel):
-    id: str
-    name: str
-    type: str
-    format: str
-    version: str
-    map_acc: float = None
-    status: str
-    file_path: str
-    speed_ms: str = None
-
-class SyncModelsPayload(BaseModel):
-    models: List[SyncModelRequest]
-
 @app.post("/api/models/sync-up")
 def sync_models_up(req: SyncModelsPayload, db: Session = Depends(get_db)):
     try:
@@ -643,29 +633,6 @@ def sync_models_up(req: SyncModelsPayload, db: Session = Depends(get_db)):
         return {"status": "success", "synced_count": updated_count}
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
-
-
-# 23082026-KIET-Chuẩn hóa một cấu hình camera nhận từ Edge Node
-class SyncCameraRequest(BaseModel):
-    camera_id: str = Field(min_length=1, max_length=100)
-    name: str = Field(min_length=1, max_length=150)
-    source_type: Literal["rtsp", "basler"]
-    source_url: Optional[str] = None
-    serial_number: Optional[str] = None
-    assigned_task: Optional[Literal["detection", "inspection"]] = None
-    enabled: bool = False
-    width: Optional[int] = None
-    height: Optional[int] = None
-    fps: Optional[float] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    base_revision: int = 0
-
-
-# 23082026-KIET-Chuẩn hóa payload đồng bộ camera của một Edge Node
-class SyncCamerasPayload(BaseModel):
-    edge_node_id: str = Field(min_length=1, max_length=100)
-    cameras: List[SyncCameraRequest]
 
 
 @app.post("/api/cameras/sync-up")

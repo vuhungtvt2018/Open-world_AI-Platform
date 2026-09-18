@@ -17,3 +17,8 @@ dataset
 *.onnx
 *.pt
 *.blob
+
+# DLL wrappers
+wrapper.dist/
+build/
+**/*.dll
