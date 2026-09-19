@@ -9,25 +9,16 @@ ROOT = FILE.parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from packages.core.config import AppConfig
-from services.database.session import init_db, SessionLocal
-from services.database.crud import create_inspection_record
+from packages.core.database.session import init_db, SessionLocal
+from packages.core.database.crud import create_inspection_record
 from services.camera_service.core import camera_manager
 from packages.utils.cleaner import run_cleaner_daemon
-
-app = FastAPI(title="SmartIC AI")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 cfg = AppConfig.from_yaml(os.path.join(str(ROOT), "config.yaml"))
 
@@ -36,11 +27,11 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 def seed_models():
-    from services.database.models import AIModel
+    from packages.core.database.models import AIModel
     db = SessionLocal()
     try:
         if db.query(AIModel).count() == 0:
-            counting_model = getattr(cfg, "MODEL_COUNTING_PATH", None) or cfg.MODEL_PATH
+            counting_model = getattr(cfg, "COUNT_MODEL_PATH", None) or cfg.DEFAULT_MODEL_PATH
             models = [
                 AIModel(id="m-det-01",  name=os.path.basename(counting_model),
                         type="Detection", format=counting_model.split('.')[-1].upper(),
@@ -63,8 +54,12 @@ def seed_models():
         db.close()
 
 
-@app.on_event("startup")
-def start_background_tasks():
+"""
+12092026 - KHAI - Merge start_background_tasks and shutdown_web_backend into lifespan
+"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start background tasks
     init_db()
     """
     23082026 - KHAI - Restore enabled camera
@@ -83,15 +78,21 @@ def start_background_tasks():
         except Exception as e:
             print(f"[ERROR] Failed to insert DB record via EventBus: {e}")
     default_event_bus.subscribe(EventBus.EVENT_INFERENCE_DONE, save_db_callback)
-
-
-"""
-23082026 - KHAI - Free camera when shutting down web backend.
-"""
-@app.on_event("shutdown")
-def shutdown_web_backend() -> None:
+    yield
+    # Shutdown web backend
     for camera_id in list(camera_manager.cameras.keys()):
         camera_manager.disconnect_camera(camera_id)
+
+
+app = FastAPI(title="SmartIC AI", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 app.mount("/captures", StaticFiles(directory=cfg.CAPTURE_DIR), name="captures")

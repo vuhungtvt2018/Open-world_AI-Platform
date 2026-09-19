@@ -3,8 +3,8 @@ import sys
 import threading
 from pathlib import Path
 from packages.core.config import AppConfig
-from packages.camera import RTSP_Threaded_Camera, Basler_Threaded_Camera
-from services.database.crud import list_camera_configs
+from packages.camera import RTSPCamera, BaslerCamera
+from packages.core.database.crud import list_camera_configs
 
 # Resolve ROOT (1_edge_node/) – 2 levels up from services/camera_service/
 FILE = Path(__file__).resolve()
@@ -99,7 +99,7 @@ class CameraManager:
                 if str(source).isdigit():
                     source = int(source)
 
-                camera = RTSP_Threaded_Camera(
+                camera = RTSPCamera(
                     source,
                     width=width,
                     height=height,
@@ -107,7 +107,7 @@ class CameraManager:
                 )
                 input_mode = "stream"
             elif source_type == "basler":
-                camera = Basler_Threaded_Camera(
+                camera = BaslerCamera(
                     serial_number=camera_config.get("serial_number"),
                     width=width,
                     height=height,

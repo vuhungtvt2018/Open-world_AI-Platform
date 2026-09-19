@@ -13,7 +13,7 @@ from packages.ai.tasks.detection import YOLODetector
 
 # project modules
 from packages.core.config import AppConfig
-from packages.camera.cctv import RTSP_Threaded_Camera
+from packages.camera.cctv import RTSPCamera
 from packages.utils.utils import ensure_dirs, ts, pad_and_clip_box
 from packages.utils.session import make_session_dir
 
@@ -41,7 +41,7 @@ def main():
     # overrides
     if args.product: cfg.PRODUCT_NAME = args.product
     if args.rtsp:    cfg.RTSP_URL = args.rtsp
-    if args.model:   cfg.MODEL_PATH = args.model
+    if args.model:   cfg.DEFAULT_MODEL_PATH = args.model
     if args.display_scale is not None: cfg.DISPLAY_SCALE = float(args.display_scale)
     if args.pad is not None:           cfg.PAD_RATIO = float(args.pad)
     if args.no_flip_vertical:          cfg.FLIP_VERTICAL = False
@@ -59,9 +59,9 @@ def main():
     detector = None
     if args.mode == "model":
         print("[INFO] Loading YOLO segmentation model...")
-        detector = YOLODetector(cfg.MODEL_PATH)
+        detector = YOLODetector(cfg.DEFAULT_MODEL_PATH)
 
-    cam = RTSP_Threaded_Camera(cfg.RTSP_URL, width=cfg.CAM_WIDTH, height=cfg.CAM_HEIGHT)
+    cam = RTSPCamera(cfg.RTSP_URL, width=cfg.CAM_WIDTH, height=cfg.CAM_HEIGHT)
 
     capturing = False
     saved_count = 0

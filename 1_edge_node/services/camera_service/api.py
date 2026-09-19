@@ -7,7 +7,7 @@ from fastapi import APIRouter, UploadFile, File, Response, HTTPException
 from fastapi.responses import StreamingResponse
 from packages.camera import discover_basler_cameras
 from services.camera_service.core import camera_manager
-from services.database.crud import (
+from packages.core.database.crud import (
     get_camera_config,
     update_camera_config,
     upsert_camera_config,

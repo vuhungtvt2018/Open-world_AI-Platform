@@ -12,7 +12,6 @@ if str(ROOT) not in sys.path:
 import numpy as np
 import requests
 from typing import List, Dict, Optional
-from datetime import datetime
 
 from packages.core.config import AppConfig
 from packages.utils.session import make_session_dir
@@ -28,6 +27,9 @@ from packages.ai.tasks.anomaly import (
 06082026 - KHAI - Refactor code to adhere to modified AnomalyInferencer
 """
 class Pipeline:
+    """
+    19092026 - KHAI - Remove format_inspection_time, move to 1_edge_node\packages\ai\pipeline
+    """
     def __init__(self, cfg: AppConfig):
         self.cfg = cfg
         print("[PIPELINE] Khởi tạo các thư mục...")
@@ -51,7 +53,7 @@ class Pipeline:
         15082026 - KHAI - Add device to detector
         """
         print("[PIPELINE] Khởi tạo mô hình YOLODetector Segmentation...")
-        self.detector = YOLODetector(self.cfg.MODEL_PATH, self.cfg.ANOMALY_DEVICE)
+        self.detector = YOLODetector(self.cfg.DEFAULT_MODEL_PATH, self.cfg.ANOMALY_DEVICE)
         
         self.keypoint_detection = None
         if self.cfg.KEYPOINT_DETECTION:
@@ -146,14 +148,6 @@ class Pipeline:
                     })
                     seg_used.add(best_seg_idx)
         return matched
-
-    def format_inspection_time(self, timestamp_str: str) -> str:
-        """Chuyển đổi chuỗi YYYYMMDD_HHMMSS_ffffff thành YYYY-MM-DD HH:MM:SS"""
-        try:
-            dt = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S_%f")
-            return dt.strftime("%Y-%m-%d %H:%M:%S")
-        except:
-            return timestamp_str
 
     def classify_defect(self, image_path: str) -> Optional[Dict]:
         """Gọi API phân loại lỗi ngoài và trả về nhãn lỗi + similarity."""

@@ -1,8 +1,9 @@
-import threading
 import time
 from typing import Optional
 
 from pypylon import pylon
+
+from .base import BaseCamera
 
 
 def _get_device_value(device_info, getter_name: str) -> str | None:
@@ -46,21 +47,24 @@ def discover_basler_cameras() -> list[dict]:
     ]
 
 
-class Basler_Threaded_Camera:
+"""
+19092026 - KHAI - Change Basler_Threaded_Camera to BaslerCamera, make it a subclass of BaseCamera
+"""
+class BaslerCamera(BaseCamera):
     """
     19082026 - KIET - Đọc đúng Basler camera theo serial number trên thread riêng.
     """
 
-    def __init__(
-        self,
-        serial_number: Optional[str] = None,
-        exposure_time_us: Optional[float] = None,
-        gain: Optional[float] = None,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-        fps: Optional[float] = None,
-        auto_resolution: bool = True,
-    ):
+    def __init__(self,
+                 serial_number: Optional[str] = None,
+                 exposure_time_us: Optional[float] = None,
+                 gain: Optional[float] = None,
+                 width: Optional[int] = None,
+                 height: Optional[int] = None,
+                 fps: Optional[float] = None,
+                 auto_resolution: bool = True,
+                 *args,
+                 **kwargs):
         """
         19082026 - KIET - Khởi tạo Basler camera cụ thể để hỗ trợ nhiều thiết bị đồng thời.
         """
@@ -127,13 +131,7 @@ class Basler_Threaded_Camera:
         self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed
         self.converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
 
-        self.lock = threading.Lock()
-        self.frame = None
-        self.last_frame_at = None
-        self.last_error = None
-        self.running = True
-        self.t = threading.Thread(target=self._loop, daemon=True)
-        self.t.start()
+        super().__init__(*args, **kwargs)
 
     def _loop(self):
         """

@@ -1,7 +1,7 @@
 import yaml
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from pathlib import Path
 
 """
@@ -21,21 +21,22 @@ class BaseConfig(ABC):
 """
 @dataclass
 class AppConfig(BaseConfig):
+    """
+    19092026 - KHAI - Rearrange attributes, remove unnecessary ones
+    """
     # ===== Required (NO defaults) - must come first =====
     RTSP_URL: str
     CAPTURE_DIR: str
     PRODUCT_NAME: str
-    MODEL_PATH: str
-    MODEL_COUNTING_PATH: Optional[str] = None
+    DEFAULT_MODEL_PATH: str
 
     # ===== Edge/Robot Config (defaults) =====
-    PROJECT_PATH: Optional[str] = None
     EDGE_IP: Optional[str] = None
     PORT: Optional[int] = 8000
     EDGE_CODE: Optional[str] = None
 
     # ===== Camera (defaults) =====
-    FLIP_VERTICAL: bool = False                        # lật dọc frame khi thu
+    FLIP_VERTICAL: bool = False                       # lật dọc frame khi thu
     CAM_WIDTH: Optional[int] = None                   # độ rộng mong muốn (có thể bị backend bỏ qua)
     CAM_HEIGHT: Optional[int] = None                  # độ cao mong muốn (có thể bị backend bỏ qua)
 
@@ -43,16 +44,13 @@ class AppConfig(BaseConfig):
     DISPLAY_SCALE: float = 0.25
     PAD_RATIO: float = 0.1
 
-    # ===== Anomalib =====
+    # ===== Anomaly =====
     ANOMALY_BACKEND: str = "anomalib"
-
-    # ===== Anomalib =====
     ANOMALY_MODEL_PATH: str = "exported_models/weights/onnx/model.onnx"
     ANOMALY_DEVICE: str = "CPU"
     ANOMALY_INPUT_SIZE: int = 512
     ANOMALY_SCORE_THRESHOLD: float = 0.8
     ANOMALY_INSIDE_OVERLAP_MIN: float = 0.5
-
     """
     25082026 - KHANH - Add runtime class-name mapping for YOLO anomaly models
     """
@@ -73,26 +71,25 @@ class AppConfig(BaseConfig):
     DATA_COLLECTOR_FOLDER: str = "data_collector"      # thư mục con dưới CAPTURE_DIR/PRODUCT_NAME
 
     # ===== Sync API =====
-    API_SYNC_ENABLE: bool = False
-    API_SYNC_URL: str = "http://192.168.0.122:8030//WebApi/QualityControl/VisualInspection/SaveScannedImage"
     API_TIMEOUT: float = 8.0
-    PRODUCTION_INSTRUCTION: str = ""
     ITEM_CODE: str = ""
-    OTHER_INFO_DEFAULT: str = ""
 
-    # === Defect Classification API (bật/tắt phân loại lỗi) ===
+    # === Defect Classification API ===
     DEFECT_CLS_ENABLE: bool = False
     DEFECT_CLS_URL: str = "http://127.0.0.1:8031/search/by-image"
     DEFECT_CLS_TOPK: int = 1
     DEFECT_CLS_METRIC: str = "cosine"
     DEFECT_CLS_SIM_THRESHOLD: float = 0.8
     
-    # === Keypoints Detection ===
+    # ===== Keypoints Detection =====
     KEYPOINT_DETECTION: bool = False
     KEYPOINTS_MODEL_PATH: str = 'model_checkpoint\bulong_8ly_keypoints.pt'
     KEYPOINTS_SCORE_THRESHOLD: float = 0.5
 
-    # === Automatic Disk Cleanup ===
+    # ===== Counting =====
+    COUNT_MODEL_PATH: Optional[str] = None
+
+    # ===== Automatic Disk Cleanup =====
     DISK_CLEANUP_DAYS: float = 15.0
     DISK_CLEANUP_INTERVAL_HOURS: float = 24.0
 
@@ -107,13 +104,12 @@ class AppConfig(BaseConfig):
             CAPTURE_DIR=raw["CAPTURE_DIR"],
             
             # Edge/Robot
-            PROJECT_PATH=raw.get("PROJECT_PATH"),
             EDGE_IP=raw.get("EDGE_IP"),
             PORT=int(raw.get("PORT", 8000)) if "PORT" in raw else None,
             EDGE_CODE=raw.get("EDGE_CODE"),
             PRODUCT_NAME=raw["PRODUCT_NAME"],
-            MODEL_PATH=raw["MODEL_PATH"],
-            MODEL_COUNTING_PATH=raw.get("MODEL_COUNTING_PATH"),
+            DEFAULT_MODEL_PATH=raw["DEFAULT_MODEL_PATH"],
+            COUNT_MODEL_PATH=raw.get("COUNT_MODEL_PATH"),
 
             # Camera
             FLIP_VERTICAL=bool(raw.get("FLIP_VERTICAL", False)),
@@ -153,12 +149,8 @@ class AppConfig(BaseConfig):
             DATA_COLLECTOR_FOLDER=raw.get("DATA_COLLECTOR_FOLDER", "data_collector"),
 
             # Sync API
-            API_SYNC_ENABLE=bool(raw.get("API_SYNC_ENABLE", False)),
-            API_SYNC_URL=raw.get("API_SYNC_URL", "http://192.168.0.122:8030//WebApi/QualityControl/VisualInspection/SaveScannedImage"),
             API_TIMEOUT=float(raw.get("API_TIMEOUT", 8.0)),
-            PRODUCTION_INSTRUCTION=raw.get("PRODUCTION_INSTRUCTION", ""),
             ITEM_CODE=raw.get("ITEM_CODE", ""),
-            OTHER_INFO_DEFAULT=raw.get("OTHER_INFO_DEFAULT", ""),
             
             # Defect Classification API
             DEFECT_CLS_ENABLE=bool(raw.get("DEFECT_CLS_ENABLE", False)),

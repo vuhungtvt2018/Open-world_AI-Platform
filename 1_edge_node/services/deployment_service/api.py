@@ -10,10 +10,10 @@ from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, Response, HTTPException
 from fastapi.responses import StreamingResponse
-from services.database.session import SessionLocal
-from services.database.models import AIModel, InspectionRecord, SyncState
+from packages.core.database.session import SessionLocal
+from packages.core.database.models import AIModel, InspectionRecord, SyncState
 from packages.core.config import AppConfig
-from services.database.crud import (
+from packages.core.database.crud import (
     acknowledge_camera_configs,
     list_camera_configs,
     apply_cloud_camera_configs,

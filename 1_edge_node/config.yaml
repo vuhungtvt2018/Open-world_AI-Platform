@@ -1,16 +1,24 @@
-PROJECT_PATH: demo_bulong\1_edge_node
+# ===== Required =====
+RTSP_URL: 0
+CAPTURE_DIR: captures
+PRODUCT_NAME: bulong_1
+DEFAULT_MODEL_PATH: model_checkpoint/anchor_segment_20260822.pt
+
+# ===== Edge/Robot Config (defaults) =====
 EDGE_IP: 10.32.11.97
 PORT: 8000
 EDGE_CODE: EDGE_001
-RTSP_URL: 0
+
+# ===== Camera (defaults) =====
+FLIP_VERTICAL: false
 CAM_WIDTH: 1920
 CAM_HEIGHT: 1080
-CAPTURE_DIR: captures
-PRODUCT_NAME: bulong_1
-FLIP_VERTICAL: false
-MODEL_PATH: model_checkpoint/anchor_segment_20260822.pt
+
+# ===== Capture / display =====
 DISPLAY_SCALE: 1
 PAD_RATIO: 0.1
+
+# ===== Anomaly =====
 ANOMALY_BACKEND: yolo # anomalib | yolo
 ANOMALY_MODEL_PATH: model_checkpoint/anchor_anomaly_yolo.pt
 ANOMALY_DEVICE: CPU
@@ -20,28 +28,38 @@ ANOMALY_INSIDE_OVERLAP_MIN: 0.3
 YOLO_CLASS_NAMES:
   0: Dirty
   1: Distort
+# Anomaly region extraction & display
 ANOMALY_MIN_AREA_RATIO: 0.001
 ANOMALY_BBOX_PAD_RATIO: 0.02
 SAVE_ALL_ANOMALIES: false
 SHOW_ALL_ANOMALY_BOXES: true
+# Additional Anomalib config
 ANOMALY_AMAP_THRESHOLD: 0.68
 REDO_CENTER_CROP: false
 CENTER_CROP: 448
+
+# ===== Data collector tool =====
 DATA_COLLECTOR_FOLDER: data_collector
-API_SYNC_ENABLE: false
-API_SYNC_URL: http://127.0.0.1:8030/WebApi/QualityControl/VisualInspection/SaveScannedImage
+
+# ===== Sync API =====
 API_TIMEOUT: 20
-PRODUCTION_INSTRUCTION: bulong_1
 ITEM_CODE: bulong_1
-OTHER_INFO_DEFAULT: ''
+
+# === Defect Classification API ===
 DEFECT_CLS_ENABLE: true
 DEFECT_CLS_URL: http://127.0.0.1:8031/search/by-image
 DEFECT_CLS_TOPK: 1
 DEFECT_CLS_METRIC: cosine
 DEFECT_CLS_SIM_THRESHOLD: 0.1
+
+# ===== Keypoints Detection =====
 KEYPOINT_DETECTION: true
 KEYPOINTS_MODEL_PATH: model_checkpoint/anchor_keypoint_20260822.pt
 KEYPOINTS_SCORE_THRESHOLD: 0.5
+
+# ===== Counting =====
+COUNT_MODEL_PATH: model_checkpoint/counting.pt
+
+# ===== Automatic Disk Cleanup =====
 DISK_CLEANUP_DAYS: 15.0
 DISK_CLEANUP_INTERVAL_HOURS: 24.0
-MODEL_COUNTING_PATH: model_checkpoint/counting.pt

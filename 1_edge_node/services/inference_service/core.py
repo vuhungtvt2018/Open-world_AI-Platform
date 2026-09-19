@@ -5,7 +5,7 @@ import sys
 import threading
 import numpy as np
 from pathlib import Path
-from packages.workflow.pipeline import Pipeline
+from packages.ai.pipeline import Pipeline
 from packages.utils.utils import (ts, union_box, pad_and_clip_box, 
                     arrow_angle, rotate_image, transform_points, need_clean, clean_data,
                     transform_bbox_to_original_coords)
@@ -27,8 +27,8 @@ class WebInference:
         self.cfg = config
         self.pipeline = Pipeline(config)
 
-        # Resolve model path cho phần Counting (ưu tiên MODEL_COUNTING_PATH, fallback MODEL_PATH)
-        od_model_path = getattr(self.cfg, "MODEL_COUNTING_PATH", None) or self.cfg.MODEL_PATH
+        # Resolve model path cho phần Counting (ưu tiên COUNT_MODEL_PATH, fallback MODEL_PATH)
+        od_model_path = getattr(self.cfg, "COUNT_MODEL_PATH", None) or self.cfg.DEFAULT_MODEL_PATH
         if not os.path.isabs(od_model_path):
             if os.path.exists(od_model_path):
                 od_model_path = os.path.abspath(od_model_path)

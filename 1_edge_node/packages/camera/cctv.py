@@ -1,16 +1,26 @@
-import threading
 import time
 from typing import Optional
 
 import cv2
 
+from .base import BaseCamera
 
-class RTSP_Threaded_Camera:
+
+"""
+19092026 - KHAI - Change RTSP_Threaded_Camera to RTSPCamera, make it a subclass of BaseCamera
+"""
+class RTSPCamera(BaseCamera):
     """
     19082026 - KIET - Đọc RTSP/local camera độc lập trên thread và tự kết nối lại khi mất frame.
     """
 
-    def __init__(self, rtsp_url: str | int, width: Optional[int] = None, height: Optional[int] = None, fps: Optional[float] = None):
+    def __init__(self,
+                 rtsp_url: str | int,
+                 width: Optional[int] = None,
+                 height: Optional[int] = None,
+                 fps: Optional[float] = None,
+                 *args,
+                 **kwargs):
         """
         19082026 - KIET - Khởi tạo camera từ URL/index riêng của từng camera ID.
         """
@@ -22,13 +32,8 @@ class RTSP_Threaded_Camera:
         self.cap = self._open_capture()
         if self.cap is None:
             raise RuntimeError(f"Cannot open RTSP: {rtsp_url}")
-        self.lock = threading.Lock()
-        self.frame = None
-        self.last_frame_at = None
-        self.last_error = None
-        self.running = True
-        self.t = threading.Thread(target=self._loop, daemon=True)
-        self.t.start()
+
+        super().__init__()
 
     def _open_capture(self):
         """
@@ -76,14 +81,6 @@ class RTSP_Threaded_Camera:
                 self.frame = f
                 self.last_frame_at = time.time()
                 self.last_error = None
-
-    def read(self):
-        """
-        19082026 - KIET - Trả bản sao frame mới nhất để nhiều consumer đọc an toàn.
-        """
-
-        with self.lock:
-            return None if self.frame is None else self.frame.copy()
 
     def stop(self):
         """

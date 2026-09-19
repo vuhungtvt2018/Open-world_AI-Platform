@@ -12,8 +12,8 @@ from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from services.database.session import SessionLocal
-from services.database.models import InspectionRecord, InspectionObject, AnomalyDetail
+from packages.core.database.session import SessionLocal
+from packages.core.database.models import InspectionRecord, InspectionObject, AnomalyDetail
 from packages.core.config import AppConfig
 
 FILE = Path(__file__).resolve()
@@ -32,7 +32,7 @@ router = APIRouter(tags=["Analytics"])
 def _query_analytics_records(db, date: str, mode: Literal["counting", "inspection"]):
     from sqlalchemy import or_
     from sqlalchemy.orm import selectinload
-    from services.database.models import InspectionObject
+    from packages.core.database.models import InspectionObject
 
     if date:
         try:
@@ -340,7 +340,7 @@ async def export_analytics(
 
 @router.get("/api/analytics")
 def get_legacy_analytics():
-    from services.database.models import QCProductPhotoLibrary, InspectionRecord, InspectionObject
+    from packages.core.database.models import QCProductPhotoLibrary, InspectionRecord, InspectionObject
     from sqlalchemy import func
     import dateutil.parser
     

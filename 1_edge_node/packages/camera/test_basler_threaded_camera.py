@@ -8,14 +8,14 @@ PROJECT_ROOT = Path(r"D:\ivs\my_folder\freelance\visual_inspection\sprint_202509
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from packages.camera import Basler_Threaded_Camera
+from packages.camera import BaslerCamera
 
 
 if __name__ == "__main__":
     cam = None
     try:
-        print("Initializing Basler_Threaded_Camera...")
-        cam = Basler_Threaded_Camera(
+        print("Initializing BaslerCamera...")
+        cam = BaslerCamera(
             exposure_time_us=5000,
             gain=10,
             width=3840,
