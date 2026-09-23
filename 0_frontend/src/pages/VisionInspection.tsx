@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   BarChart3 as BarChart,
   Boxes,
@@ -18,12 +18,15 @@ import {
 import DetectionResultImage, {
   type DetectionObject,
 } from '../components/DetectionResultImage';
+import {
+  type InputMode,
+  type TaskMode,
+  useInspection,
+  type InferenceResult,
+} from '../context/InspectionContext';
 import './VisionInspection.css';
 
 const API_BASE_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000';
-
-type InputMode = 'folder' | 'camera';
-type TaskMode = 'inspection' | 'detection';
 
 interface ConfiguredCamera {
   camera_id: string;
@@ -33,33 +36,6 @@ interface ConfiguredCamera {
   status: 'disconnected' | 'connecting' | 'online' | 'error';
 }
 
-interface InferenceMetrics {
-  latency_ms?: number;
-  total_objects?: number;
-  counts_by_class?: Record<string, number>;
-  ng_count?: number;
-  max_score?: number;
-}
-
-interface InferenceResult {
-  status?: string;
-  message?: string;
-  detail?: string;
-  timestamp?: string;
-  task?: TaskMode;
-  ng_detected?: boolean;
-  original_image_url?: string;
-  image_width?: number;
-  image_height?: number;
-  metrics?: InferenceMetrics;
-  objects?: DetectionObject[];
-  vis_urls?: {
-    heatmap?: string;
-    crops?: string;
-    overall?: string;
-  };
-}
-
 interface HistoryRecord {
   id?: number;
   timestamp: string;
@@ -67,22 +43,33 @@ interface HistoryRecord {
   ng_detected?: boolean;
   total_objects?: number;
   counts_by_class?: Record<string, number>;
+  result?: InferenceResult;
 }
 
 const DETECTION_CLASSES = ['screw', 'washer', 'wood_screw']; //har nữa chỉnh sau
 
 // 19082026 - PHUC - Update UI
 // 12082026 - KIET - Hiển thị màn hình Inspection và Object Detection trên Edge UI.
+// 23092026 - KHAI - Add persistent variables
 export default function VisionInspection() {
-  const [isInspecting, setIsInspecting] = useState(false);
-  const [latestResult, setLatestResult] = useState<InferenceResult | null>(null);
+  const {
+    isInspecting,
+    setIsInspecting,
+    inputMode,
+    setInputMode,
+    taskMode,
+    setTaskMode,
+    inputPreviewUrl,
+    setInputPreviewUrl,
+    latestResult,
+    setLatestResult,
+  } = useInspection();
   const [history, setHistory] = useState<HistoryRecord[]>([]);
-  const [inputMode, setInputMode] = useState<InputMode>('folder');
-  const [taskMode, setTaskMode] = useState<TaskMode>('detection');
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [selectedImage, setSelectedImage] = useState('');
   const [configuredCameras, setConfiguredCameras] = useState<ConfiguredCamera[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState<string>('');
+  const hasHydratedHistory = useRef(false);
   const [modalImage, setModalImage] = useState<{
     title: string;
     type: 'image' | 'detection';
@@ -135,6 +122,18 @@ export default function VisionInspection() {
       console.error('Failed to fetch history:', error);
     }
   }, []);
+
+  useEffect(() => {
+    if (hasHydratedHistory.current || latestResult || isInspecting || history.length === 0) {
+      return;
+    }
+
+    const latestForTask = history.find((item) => (item.task_type || 'inspection') === taskMode);
+    if (latestForTask?.result) {
+      setLatestResult(latestForTask.result);
+    }
+    hasHydratedHistory.current = true;
+  }, [history, isInspecting, latestResult, setLatestResult, taskMode]);
 
   // 12082026 - KIET - Tải danh sách ảnh input hiện có trên Edge API.
   const fetchImages = useCallback(async () => {
@@ -202,12 +201,14 @@ export default function VisionInspection() {
     }
 
     setInputMode(mode);
+    setInputPreviewUrl(null);
     setLatestResult(null);
   };
 
   // 12082026 - KIET - Đổi AI task mode và xóa kết quả cũ trên giao diện.
   const handleTaskModeChange = (mode: TaskMode) => {
     setTaskMode(mode);
+    setInputPreviewUrl(null);
     setLatestResult(null);
 
     // 19082026 - KIET - Ưu tiên camera đã được gán đúng task từ Live Stream config.
@@ -229,6 +230,7 @@ export default function VisionInspection() {
       }
 
       setSelectedImage(filename);
+      setInputPreviewUrl(null);
       setLatestResult(null);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Failed to select image');
@@ -256,6 +258,7 @@ export default function VisionInspection() {
 
       setAvailableImages(data.images || []);
       setSelectedImage(data.filename || '');
+      setInputPreviewUrl(null);
       setLatestResult(null);
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Upload failed');
@@ -266,6 +269,17 @@ export default function VisionInspection() {
 
   // 12082026 - KIET - Gọi endpoint tương ứng với Object Detection hoặc Inspection.
   const handleInference = async () => {
+    // 23092026 - KHAI - Add persistence to input mode
+    const sourcePreviewUrl = inputMode === 'camera'
+      ? selectedCameraId
+        && ['online', 'connecting'].includes(selectedConfiguredCamera?.status || '')
+        ? `${API_BASE_URL}/video-feed?cam=${encodeURIComponent(selectedCameraId)}&fps=15`
+        : null
+      : selectedImage
+        ? `${API_BASE_URL}/images/${selectedImage}`
+        : null;
+
+    setInputPreviewUrl(sourcePreviewUrl);
     setIsInspecting(true);
 
     try {
@@ -291,6 +305,30 @@ export default function VisionInspection() {
     }
   };
 
+  // 23092026 - KHAI - Acquire latest inspection result for persistence even when switching
+  // between tabs
+  const handleHistorySelect = async (item: HistoryRecord) => {
+    if (!item.id) {
+      if (item.result) {
+        setLatestResult(item.result);
+      }
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/history/${item.id}`, { cache: 'no-store' });
+      const result: InferenceResult = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || 'Failed to load history record');
+      }
+
+      setTaskMode(item.task_type || 'inspection');
+      setLatestResult(result);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Failed to load history record');
+    }
+  };
+
   const visibleHistory = history
     .filter((item) => (item.task_type || 'inspection') === taskMode)
     .slice(0, 5);
@@ -302,15 +340,20 @@ export default function VisionInspection() {
   // 19082026 - KIET - Chỉ mở MJPEG stream khi camera config đang online hoặc connecting.
   // 22082026 - PHUC - Camera mode mà camera offline thì hiển thị placeholder,
   // không fallback sang ảnh folder để tránh nhầm ảnh cũ là feed camera.
+  // 23092026 - KHAI - Add persistence to input image
+  const persistedInputImage = latestResult?.original_image_url
+    ? `${API_BASE_URL}${latestResult.original_image_url}`
+    : inputPreviewUrl;
   const inputImage =
-    inputMode === 'camera'
+    persistedInputImage
+    || (inputMode === 'camera'
       ? selectedCameraId
         && ['online', 'connecting'].includes(selectedConfiguredCamera?.status || '')
         ? `${API_BASE_URL}/video-feed?cam=${encodeURIComponent(selectedCameraId)}&fps=15`
         : null
       : selectedImage
         ? `${API_BASE_URL}/images/${selectedImage}`
-        : null;
+        : null);
 
   return (
     <div className="inspection-container">
@@ -384,7 +427,7 @@ export default function VisionInspection() {
 
       <div className="inspection-grid">
         <div className="main-viewer">
-          <div className={`quad-viewer ${taskMode === 'detection' ? 'detection-mode' : ''}`}>
+          <div className={`quad-viewer ${taskMode === 'detection' ? 'detection-mode' : 'inspection-mode'}`}>
             <div className="view-panel glass-panel">
               <div className="view-header">
                 <div className="view-header-title">
@@ -533,8 +576,34 @@ export default function VisionInspection() {
                       <span className="view-step-badge">2</span>
                       <span className="view-header-label">Object Heatmaps</span>
                     </div>
+                    {latestResult?.vis_urls?.heatmap && (
+                      // 23092026 - KHAI - Open viwer in Object Heatmaps section
+                      <button
+                        className="view-expand-btn"
+                        title="View object heatmaps"
+                        onClick={() => handleOpenModal({
+                          title: '2. Object Heatmaps',
+                          type: 'image',
+                          imageUrl: `${API_BASE_URL}${latestResult.vis_urls?.heatmap}`,
+                        })}
+                      >
+                        <Maximize2 size={13} /> View
+                      </button>
+                    )}
                   </div>
-                  <div className="image-display">
+                  <div
+                    className={`image-display ${latestResult?.vis_urls?.heatmap ? 'cursor-pointer' : ''}`}
+                    onClick={() => {
+                      // 23092026 - KHAI - Open viwer in Object Heatmaps section
+                      if (latestResult?.vis_urls?.heatmap) {
+                        handleOpenModal({
+                          title: '2. Object Heatmaps',
+                          type: 'image',
+                          imageUrl: `${API_BASE_URL}${latestResult.vis_urls.heatmap}`,
+                        });
+                      }
+                    }}
+                  >
                     {latestResult?.vis_urls?.heatmap ? (
                       <img src={`${API_BASE_URL}${latestResult.vis_urls.heatmap}`} alt="Heatmaps" className="result-image" />
                     ) : (
@@ -552,8 +621,33 @@ export default function VisionInspection() {
                       <span className="view-step-badge">3</span>
                       <span className="view-header-label">Object Outputs (Crops)</span>
                     </div>
+                    {latestResult?.vis_urls?.crops && (
+                      // 23092026 - KHAI - Open viwer in Object Outputs section
+                      <button
+                        className="view-expand-btn"
+                        title="View object output crops"
+                        onClick={() => handleOpenModal({
+                          title: '3. Object Outputs (Crops)',
+                          type: 'image',
+                          imageUrl: `${API_BASE_URL}${latestResult.vis_urls?.crops}`,
+                        })}
+                      >
+                        <Maximize2 size={13} /> View
+                      </button>
+                    )}
                   </div>
-                  <div className="image-display">
+                  <div
+                    className={`image-display ${latestResult?.vis_urls?.crops ? 'cursor-pointer' : ''}`}
+                    onClick={() => {
+                      if (latestResult?.vis_urls?.crops) {
+                        handleOpenModal({
+                          title: '3. Object Outputs (Crops)',
+                          type: 'image',
+                          imageUrl: `${API_BASE_URL}${latestResult.vis_urls.crops}`,
+                        });
+                      }
+                    }}
+                  >
                     {latestResult?.vis_urls?.crops ? (
                       <img src={`${API_BASE_URL}${latestResult.vis_urls.crops}`} alt="Crops" className="result-image" />
                     ) : (
@@ -572,12 +666,38 @@ export default function VisionInspection() {
                       <span className="view-header-label">Overall Result</span>
                     </div>
                     {latestResult && (
+                      // 23092026 - KHAI - Change label of latest result
                       <span className={`result-tag ${latestResult.ng_detected ? 'ng' : 'ok'}`}>
-                        {latestResult.ng_detected ? 'NG DETECTED' : 'QUALITY OK'}
+                        {latestResult.ng_detected ? 'NG' : 'OK'}
                       </span>
                     )}
+                    {latestResult?.vis_urls?.overall && (
+                      // 23092026 - KHAI - Open viwer in Overall Result section
+                      <button
+                        className="view-expand-btn"
+                        title="View overall result"
+                        onClick={() => handleOpenModal({
+                          title: '4. Overall Result',
+                          type: 'image',
+                          imageUrl: `${API_BASE_URL}${latestResult.vis_urls?.overall}`,
+                        })}
+                      >
+                        <Maximize2 size={13} /> View
+                      </button>
+                    )}
                   </div>
-                  <div className="image-display">
+                  <div
+                    className={`image-display ${latestResult?.vis_urls?.overall ? 'cursor-pointer' : ''}`}
+                    onClick={() => {
+                      if (latestResult?.vis_urls?.overall) {
+                        handleOpenModal({
+                          title: '4. Overall Result',
+                          type: 'image',
+                          imageUrl: `${API_BASE_URL}${latestResult.vis_urls.overall}`,
+                        });
+                      }
+                    }}
+                  >
                     {latestResult?.vis_urls?.overall ? (
                       <img src={`${API_BASE_URL}${latestResult.vis_urls.overall}`} alt="Overall result" className="result-image" />
                     ) : (
@@ -724,8 +844,14 @@ export default function VisionInspection() {
             <h3 className="panel-title">Recent History</h3>
             <div className="history-list">
               {visibleHistory.length ? (
+                // 23092026 - KHAI - Add button to load inference result
                 visibleHistory.map((item, index) => (
-                  <div key={item.id ?? `${item.timestamp}-${index}`} className="history-item">
+                  <button
+                    key={item.id ?? `${item.timestamp}-${index}`}
+                    className="history-item"
+                    onClick={() => handleHistorySelect(item)}
+                    title="Load this inference result"
+                  >
                     <div
                       className={`status-dot ${taskMode === 'detection'
                         ? 'bg-primary'
@@ -745,7 +871,7 @@ export default function VisionInspection() {
                       </span>
                     </div>
                     <Search size={14} className="text-muted" />
-                  </div>
+                  </button>
                 ))
               ) : (
                 <p className="text-muted text-center py-8">No history available</p>

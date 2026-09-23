@@ -478,8 +478,11 @@ async def sync_up(
         
         # Parse objects
         for obj_data in data.get("objects", []):
+            """
+            23092026 - KHAI - Change parameter names to generalize
+            """
             bolt = InspectionObject(
-                edge_bolt_id=obj_data.get("id"),
+                edge_object_id=obj_data.get("id"),
                 object_index=obj_data.get("object_index", 0),
                 bbox=obj_data.get("bbox", ""),
                 score=obj_data.get("score", 0.0),

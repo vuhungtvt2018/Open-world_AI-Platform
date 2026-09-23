@@ -3,6 +3,7 @@ import os
 import sys
 import ast
 import glob
+import cv2
 from typing import Literal
 from collections import Counter
 from pathlib import Path
@@ -23,6 +24,72 @@ if str(ROOT) not in sys.path:
 cfg = AppConfig.from_yaml(os.path.join(str(ROOT), "config.yaml"))
 
 router = APIRouter(tags=["Analytics"])
+
+
+"""
+23092026 - KHAI - Create a function to construct inspection result from persistent session files
+"""
+def _build_persisted_result(record: InspectionRecord, objects: list[dict]) -> dict:
+    """Rebuild the frontend inference payload from the persisted session files."""
+    original_matches = glob.glob(
+        os.path.join(
+            cfg.CAPTURE_DIR,
+            cfg.PRODUCT_NAME,
+            "sessions",
+            "*",
+            "original",
+            os.path.basename(record.original_image),
+        )
+    )
+    result = {
+        "status": "success",
+        "timestamp": record.timestamp,
+        "task": record.task_type,
+        "task_type": record.task_type,
+        "camera_id": record.camera_id,
+        "ng_detected": record.ng_detected,
+        "metrics": {
+            "latency_ms": record.latency_ms,
+            "total_objects": record.total_objects or len(objects),
+            "counts_by_class": dict(Counter(
+                obj.get("class_name") or "unknown" for obj in objects
+            )) if record.task_type == "detection" else {},
+            "ng_count": sum(1 for obj in objects if obj.get("is_ng")),
+            "max_score": max((obj.get("score") or 0.0 for obj in objects), default=0.0),
+        },
+        "objects": objects,
+    }
+
+    if not original_matches:
+        return result
+
+    original_path = original_matches[-1]
+    session_dir = os.path.dirname(os.path.dirname(original_path))
+    session_url = (
+        f"/captures/{cfg.PRODUCT_NAME}/sessions/"
+        f"{os.path.basename(session_dir)}"
+    )
+    result["original_image_url"] = f"{session_url}/original/{os.path.basename(original_path)}"
+
+    image = cv2.imread(original_path)
+    if image is not None:
+        result["image_height"], result["image_width"] = image.shape[:2]
+
+    if record.task_type == "inspection":
+        visualization_urls = {}
+        for key, pattern in (
+            ("heatmap", "HM_*.jpg"),
+            ("crops", "CROPS_VIS_*.jpg"),
+            ("overall", "OVERALL_*.jpg"),
+        ):
+            matches = glob.glob(os.path.join(session_dir, pattern))
+            if matches:
+                visualization_urls[key] = (
+                    f"{session_url}/{os.path.basename(matches[-1])}"
+                )
+        result["vis_urls"] = visualization_urls
+
+    return result
 
 
 """
@@ -540,6 +607,7 @@ async def get_history():
             23082026 - KHAI - Add task type, camera ID fields and fields for class counting
             """
             results.append({
+                "id": r.id,
                 "timestamp": r.timestamp,
                 "image": r.original_image,
                 "ng_detected": r.ng_detected,
@@ -551,12 +619,48 @@ async def get_history():
                 "counts_by_class": counts_by_class,
                 "ng_count": sum(1 for ob in objs if ob["is_ng"]),
                 "max_score": max([ob["score"] for ob in objs]) if objs else 0.0,
-                "objects": objs
+                "objects": objs,
+                "result": _build_persisted_result(r, objs),
             })
         return {"results": results}
     except Exception as e:
         print(f"Error fetching history: {e}")
         return {"results": []}
+    finally:
+        db.close()
+
+
+"""
+23092026 - KHAI - Create a new endpoint to get history record for persistence
+"""
+@router.get("/history/{record_id}")
+async def get_history_record(record_id: int):
+    db = SessionLocal()
+    try:
+        record = db.query(InspectionRecord).filter(InspectionRecord.id == record_id).first()
+        if record is None:
+            return Response(status_code=404)
+
+        objects = []
+        for obj in record.objects:
+            try:
+                bbox = ast.literal_eval(obj.bbox) if obj.bbox else []
+            except Exception:
+                bbox = []
+            objects.append({
+                "index": obj.object_index,
+                "bbox": bbox,
+                "score": obj.score,
+                "class_id": obj.class_id,
+                "class_name": obj.class_name,
+                "is_ng": obj.is_ng,
+                "overlap_ratio": obj.overlap_ratio,
+                "crop": obj.crop_image,
+                "anomalies": [],
+                "anomaly_count": len(obj.anomalies),
+            })
+
+        return _build_persisted_result(record, objects)
     finally:
         db.close()
 

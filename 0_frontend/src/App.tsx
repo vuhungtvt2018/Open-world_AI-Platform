@@ -13,6 +13,8 @@ import Alerts from './pages/Alerts';
 import LiveStream from './pages/LiveStream';
 import EdgeDashboard from './pages/EdgeDashboard';
 import DefectSearch from './pages/DefectSearch';
+// 23092026 - KHAI - Add context for Visual Inspection tab
+import { InspectionProvider } from './context/InspectionContext';
 import './App.css';
 
 // 15082026 - KIET - Chỉ mount tab đang mở để dừng polling và video stream của tab ẩn.
@@ -80,7 +82,8 @@ function App() {
   }
 
   return (
-    <div className="app-container">
+    <InspectionProvider>
+      <div className="app-container">
       <Sidebar 
         activeTab={activeTab} 
         onTabChange={setActiveTab} 
@@ -140,7 +143,8 @@ function App() {
       >
         <ChevronUp size={24} />
       </button>
-    </div>
+      </div>
+    </InspectionProvider>
   );
 }
 

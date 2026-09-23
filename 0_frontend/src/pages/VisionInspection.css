@@ -392,8 +392,15 @@
   margin: 12px 0;
 }
 
+/* 
+23092026 - KHAI - Fix size for each quad image viewer in both detection and inspection mode
+*/
 .quad-viewer.detection-mode {
-  grid-template-rows: 1fr auto;
+  grid-template-rows: 1fr 1fr;
+}
+
+.quad-viewer.inspection-mode {
+  grid-template-rows: 1fr 1fr;
 }
 
 .counting-summary-panel {
