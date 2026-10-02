@@ -4,7 +4,6 @@ import './Analytics.css';
 import './DefectSearch.css';
 
 const CLOUD_API_URL = import.meta.env.VITE_CLOUD_API_URL || 'http://localhost:8031';
-const EDGE_API_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000';
 
 interface DefectSearchResult {
   ID: number;
@@ -202,7 +201,9 @@ export default function DefectSearch() {
                 <div style={{ height: '120px', background: '#000', marginBottom: '10px', borderRadius: '4px', overflow: 'hidden', position: 'relative' }}>
                   {r.ImageName ? (
                     <img 
-                      src={`${EDGE_API_URL}/sync_images/${r.ItemCode ? r.ItemCode + '/' : ''}${r.ImageName}`} 
+                      /* 20092026 - KIET - Ảnh thư viện nằm ở uploads/ của Cloud Server,
+                         lấy từ Edge (/sync_images) nên luôn vỡ ảnh */
+                      src={`${CLOUD_API_URL}/uploads/${r.ItemCode ? r.ItemCode + '/' : ''}${r.ImageName}`}
                       alt="Defect Result" 
                       style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                       onError={(e) => {
@@ -215,7 +216,7 @@ export default function DefectSearch() {
                   ) : null}
                   <div style={{ display: r.ImageName ? 'none' : 'flex', flexDirection: 'column', height: '100%', alignItems: 'center', justifyContent: 'center', color: '#888', textAlign: 'center', padding: '10px' }}>
                     <ImageIcon size={24} style={{ marginBottom: '5px' }} />
-                    <span style={{ fontSize: '0.7rem' }}>Ảnh chưa đồng bộ từ Cloud về Edge</span>
+                    <span style={{ fontSize: '0.7rem' }}>Không tải được ảnh từ Cloud Server</span>
                   </div>
                 </div>
                 <div style={{ fontSize: '0.9rem', color: 'var(--text-primary)', marginBottom: '5px' }}>

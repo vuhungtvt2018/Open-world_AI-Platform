@@ -1,5 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Query, Depends
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text, bindparam, func, inspect
 from sqlalchemy.orm import Session
 from pgvector.sqlalchemy import Vector
@@ -9,6 +10,7 @@ from pydantic import BaseModel, Field
 from uuid import uuid4
 from datetime import datetime
 import os, io, json
+import numpy as np
 import dateutil.parser
 
 from db import Base, engine, SessionLocal, ensure_pgvector
@@ -40,22 +42,13 @@ app.add_middleware(
 
 # --- DB init ---
 
-# 17082026 - KIET - Chỉ tạo bảng model khi test sync bằng SQLite
-if engine.dialect.name == "sqlite":
-    CloudAIModel.__table__.create(
-        bind=engine,
-        checkfirst=True
-    )
-    # 23082026-KIET-Tạo bảng camera sync khi Cloud Server chạy bằng SQLite
-    CloudCameraConfig.__table__.create(
-        bind=engine,
-        checkfirst=True,
-    )
-
-# 17082026 - KIET - Giữ cơ chế tạo đầy đủ database khi dùng PostgreSQL
-else:
+# 17082026 - KIET - Giữ cơ chế bật pgvector khi dùng PostgreSQL
+if engine.dialect.name == "postgresql":
     ensure_pgvector()
-    Base.metadata.create_all(bind=engine)
+
+# 20092026 - KIET - Trước đây chạy SQLite chỉ tạo 2 bảng sync nên thiếu bảng thư
+# viện ảnh, không dùng được Defect Search. Tạo đủ bảng cho cả 2 loại database.
+Base.metadata.create_all(bind=engine)
 
 
 # 23082026-KIET-Bổ sung các cột camera sync cho database Cloud đã tồn tại
@@ -114,6 +107,10 @@ if settings.ENABLE_IVFFLAT_INDEX and  engine.dialect.name == "postgresql":
 # --- Ensure upload dir exists ---
 os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 
+# 20092026 - KIET - Ảnh thư viện lỗi nằm ở uploads/ của Cloud nhưng không được
+# phục vụ qua HTTP, nên frontend không hiển thị được. Mount để xem trực tiếp.
+app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+
 def get_db():
     db = SessionLocal()
     try:
@@ -132,6 +129,55 @@ def _metric_sql(metric: str) -> str:
 def _gen_filename(ext: str = ".jpg") -> str:
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"{ts}_{uuid4().hex[:16]}{ext}"
+
+
+# 20092026 - KIET - SQLite không có pgvector (toán tử <=>) nên tính khoảng cách
+# bằng numpy trong Python. Thư viện ảnh cỡ vài nghìn tấm vẫn chạy nhanh.
+def _search_by_image_sqlite(
+    db: Session,
+    qvec: List[float],
+    top_k: int,
+    metric: str,
+    item_code: Optional[str],
+) -> List[SearchResultItem]:
+    rows = db.execute(
+        select(QCProductPhotoLibrary).where(QCProductPhotoLibrary.embedding.is_not(None))
+    ).scalars().all()
+
+    candidates = [r for r in rows if r.ItemCode == item_code] if item_code else rows
+    # Giữ hành vi fallback giống bản PostgreSQL: lọc theo ItemCode không ra thì tìm toàn bộ
+    if not candidates and item_code:
+        candidates = rows
+
+    q = np.asarray(qvec, dtype=np.float32)
+    m = (metric or "cosine").lower()
+
+    scored = []
+    for rec in candidates:
+        v = np.asarray(rec.embedding, dtype=np.float32)
+        if v.shape != q.shape:
+            continue
+        if m == "ip":
+            distance = -float(np.dot(q, v))
+        elif m == "l2":
+            distance = float(np.linalg.norm(q - v))
+        else:
+            denom = float(np.linalg.norm(q) * np.linalg.norm(v)) or 1e-12
+            distance = 1.0 - float(np.dot(q, v)) / denom
+        scored.append((distance, rec))
+
+    scored.sort(key=lambda item: item[0])
+    return [
+        SearchResultItem(
+            ID=rec.ID,
+            SM_ID=rec.SM_ID,
+            distance=distance,
+            ItemCode=rec.ItemCode,
+            ImageName=rec.ImageName,
+            ErrorDetail=rec.ErrorDetail,
+        )
+        for distance, rec in scored[:top_k]
+    ]
 
 @app.post("/photos", response_model=PhotoRead)
 async def create_photo(
@@ -368,6 +414,11 @@ async def search_by_image(
         raise HTTPException(status_code=400, detail="File ảnh không hợp lệ")
 
     qvec = embed_pil(pil)
+
+    # 20092026 - KIET - Chạy SQLite thì so khớp vector bằng numpy, không có pgvector
+    if engine.dialect.name != "postgresql":
+        return _search_by_image_sqlite(db, qvec, top_k, metric, ItemCode)
+
     op = _metric_sql(metric)
 
     where = 'WHERE embedding IS NOT NULL'

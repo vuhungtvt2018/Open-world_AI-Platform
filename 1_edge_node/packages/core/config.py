@@ -96,24 +96,40 @@ class AppConfig(BaseConfig):
     DISK_CLEANUP_DAYS: float = 15.0
     DISK_CLEANUP_INTERVAL_HOURS: float = 24.0
 
+    """
+    19092026 - KIET - Model paths in config.yaml were kept as raw relative
+    strings and passed straight to torch.load(), so they only resolved
+    correctly when the process happened to be launched from the right CWD.
+    Resolve them to absolute paths based on config.yaml's own location instead.
+    """
     @staticmethod
     def from_yaml(path: str | Path) -> "AppConfig":
-        path = str(Path(path))
+        path = Path(path).resolve()
+        base_dir = path.parent
         with open(path, "r", encoding="utf-8") as f:
             raw: Dict[str, Any] = yaml.safe_load(f)
+
+        def resolve_path(value: Optional[str]) -> Optional[str]:
+            """Resolve a path from config.yaml relative to config.yaml's own
+            directory, so it no longer depends on the process's CWD at launch."""
+            if not value:
+                return value
+            p = Path(value)
+            return str(p) if p.is_absolute() else str((base_dir / p).resolve())
+
         return AppConfig(
             # Required
             RTSP_URL=raw["RTSP_URL"],
             CAPTURE_DIR=raw["CAPTURE_DIR"],
-            
+
             # Edge/Robot
             PROJECT_PATH=raw.get("PROJECT_PATH"),
             EDGE_IP=raw.get("EDGE_IP"),
             PORT=int(raw.get("PORT", 8000)) if "PORT" in raw else None,
             EDGE_CODE=raw.get("EDGE_CODE"),
             PRODUCT_NAME=raw["PRODUCT_NAME"],
-            MODEL_PATH=raw["MODEL_PATH"],
-            MODEL_COUNTING_PATH=raw.get("MODEL_COUNTING_PATH"),
+            MODEL_PATH=resolve_path(raw["MODEL_PATH"]),  # 19092026-KIET-resolve path relative to config.yaml
+            MODEL_COUNTING_PATH=resolve_path(raw.get("MODEL_COUNTING_PATH")),  # 19092026-KIET-resolve path relative to config.yaml
 
             # Camera
             FLIP_VERTICAL=bool(raw.get("FLIP_VERTICAL", False)),
@@ -128,7 +144,7 @@ class AppConfig(BaseConfig):
             ANOMALY_BACKEND=raw.get("ANOMALY_BACKEND", "anomalib"),
 
             # Anomalib
-            ANOMALY_MODEL_PATH=raw.get("ANOMALY_MODEL_PATH", "exported_models/weights/onnx/model.onnx"),
+            ANOMALY_MODEL_PATH=resolve_path(raw.get("ANOMALY_MODEL_PATH", "exported_models/weights/onnx/model.onnx")),  # 19092026-KIET-resolve path relative to config.yaml
             ANOMALY_DEVICE=raw.get("ANOMALY_DEVICE", "CPU"),
             ANOMALY_INPUT_SIZE=int(raw.get("ANOMALY_INPUT_SIZE", 512)),
             ANOMALY_SCORE_THRESHOLD=float(raw.get("ANOMALY_SCORE_THRESHOLD", 0.8)),
@@ -169,7 +185,7 @@ class AppConfig(BaseConfig):
             
             # === Keypoints Detection ===
             KEYPOINT_DETECTION = bool(raw.get('KEYPOINT_DETECTION', False)),
-            KEYPOINTS_MODEL_PATH = raw.get("KEYPOINTS_MODEL_PATH", 'model_checkpoint\bulong_8ly_keypoints.pt'),
+            KEYPOINTS_MODEL_PATH = resolve_path(raw.get("KEYPOINTS_MODEL_PATH", 'model_checkpoint\\bulong_8ly_keypoints.pt')),  # 19092026-KIET-resolve path relative to config.yaml
             KEYPOINTS_SCORE_THRESHOLD = float(raw.get("KEYPOINTS_SCORE_THRESHOLD", 0.5)),
 
             # === Automatic Disk Cleanup ===

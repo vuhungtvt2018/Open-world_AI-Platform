@@ -31,6 +31,7 @@ const API_BASE_URL = import.meta.env.VITE_EDGE_API_URL || 'http://localhost:8000
 const getCameraLiveUrl = (cameraId: string) =>
   `${API_BASE_URL}/video-feed?cam=${encodeURIComponent(cameraId)}&fps=15`;
 
+
 // const INITIAL_HISTORY: HistoryRecord[] = [
 //   {
 //     id: 'H-101',
@@ -83,7 +84,24 @@ export function App() {
       const response = await fetch(`${API_BASE_URL}/history`, { cache: 'no-store' });
       const data = await response.json();
       if (response.ok) {
-        setHistory([...(data.results || [])].reverse());
+        /*
+         * 19092026 - KIET - Backend trả field snake_case (total_objects, task_type,
+         * ng_detected...) nhưng để thẳng vào HistoryRecord (cần mode/status/totalObjects
+         * camelCase) khiến UI hiện "UNKNOWN" và "undefined". Map lại đúng field ở đây.
+         */
+        const mapped: HistoryRecord[] = (data.results || []).map((r: any, idx: number) => {
+          const recMode: SystemMode = r.task_type === 'detection' ? 'COUNTING' : 'INSPECTION';
+          return {
+            id: r.id != null ? String(r.id) : `${r.timestamp}-${idx}`,
+            timestamp: r.timestamp,
+            mode: recMode,
+            status: recMode === 'COUNTING' ? 'COUNT' : (r.ng_detected ? 'NG' : 'OK'),
+            totalObjects: r.total_objects ?? 0,
+            countsByClass: r.counts_by_class,
+            defectType: r.ng_detected ? 'Defect Detected' : undefined,
+          };
+        });
+        setHistory(mapped.reverse());
       }
     } catch (error) {
       console.error('Failed to fetch history:', error);
@@ -176,6 +194,38 @@ export function App() {
     setInferenceResult(null);
   };
 
+  /*
+   * 19092026 - KIET - Rời Camera Operation (bấm qua Dashboard/Search/Report) thì
+   * bỏ hết tiến trình, quay lại là màn hình mặc định.
+   */
+  const handleViewModeChange = (newViewMode: MainViewMode) => {
+    setActiveViewMode(newViewMode);
+    setSourceMode('preview');
+    setIsRunning(false);
+    setUploadedImage(null);
+    setInferenceResult(null);
+  };
+
+  /*
+   * 19092026 - KIET - Đổi Mode (Counting/Inspection) thì xoá ảnh đầu vào và kết
+   * quả cũ, nhưng vẫn giữ Source Mode đang chọn (Upload/Camera/Preview).
+   */
+  const handleModeChange = (newMode: SystemMode) => {
+    setMode(newMode);
+    setIsRunning(false);
+    setUploadedImage(null);
+    setInferenceResult(null);
+  };
+
+  /*
+   * 20092026 - KIET - Chọn ảnh mới mà không xoá kết quả cũ nên ô 2/3/4 (Heatmap,
+   * Crops, Overall) vẫn hiện ảnh của lần chạy trước. Xoá kết quả cũ khi đổi ảnh.
+   */
+  const handleUploadImage = (imageUrl: string) => {
+    setUploadedImage(imageUrl);
+    setInferenceResult(null);
+  };
+
   const handleToggleRun = async () => {
     if (isRunning) {
       setIsRunning(false);
@@ -203,6 +253,8 @@ export function App() {
           countsByClass: result.metrics?.counts_by_class,
           defectType: result.ng_detected ? 'Defect Detected' : undefined,
           confidence: result.metrics?.max_score || 0,
+          // 20092026 - KIET - Giữ lại metrics (ng_count, latency_ms...) để Details hiện số thật
+          metrics: result.metrics,
           original_image_url: result.original_image_url,
           image_width: result.image_width,
           image_height: result.image_height,
@@ -362,9 +414,9 @@ export function App() {
       {/* Header Bar with 4 main view choices */}
       <Header
         activeViewMode={activeViewMode}
-        onViewModeChange={setActiveViewMode}
+        onViewModeChange={handleViewModeChange}
         mode={mode}
-        onModeChange={setMode}
+        onModeChange={handleModeChange}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
@@ -406,7 +458,7 @@ export function App() {
                     isRunning={isRunning}
                     onToggleRun={handleToggleRun}
                     uploadedImage={uploadedImage}
-                    onUploadImage={setUploadedImage}
+                    onUploadImage={handleUploadImage}
                     inferenceResult={inferenceResult}
                   />
                 </div>

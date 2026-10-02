@@ -401,7 +401,9 @@ export const PanelPreview: React.FC<PanelPreviewProps> = ({
                   </div>
                   <div className="screen-card-media">
                     {inferenceResult || isRunning ? (
-                      <img src={displayHeatmap} alt="Heatmap" className="screen-img heatmap-effect" />
+                      /* 20092026 - KIET - Bỏ class heatmap-effect vì filter hue-rotate làm nhãn
+                         OK (xanh lá) bị đổi thành đỏ, NG (đỏ) thành xanh dương */
+                      <img src={displayHeatmap} alt="Heatmap" className="screen-img" />
                     ) : (
                       <div className="media-placeholder">
                         <Flame size={36} className="placeholder-icon" />

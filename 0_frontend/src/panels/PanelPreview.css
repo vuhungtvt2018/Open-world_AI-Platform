@@ -613,10 +613,6 @@
   object-fit: cover;
 }
 
-.screen-img.heatmap-effect {
-  filter: hue-rotate(240deg) saturate(2);
-}
-
 .screen-overlay-svg {
   position: absolute;
   top: 0;

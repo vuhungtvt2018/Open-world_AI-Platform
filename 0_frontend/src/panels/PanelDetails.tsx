@@ -79,19 +79,29 @@ export const PanelDetails: React.FC<PanelDetailsProps> = ({
 
   // Active result state for Camera & Upload mode (or Preview mode when results active)
   if ((sourceMode === 'camera' || sourceMode === 'upload') && (isRunning || inferenceResult)) {
-    const currentRes = inferenceResult || {
+    /*
+     * 20092026 - KIET - Trước đây fallback là số giả (2 SP / NG / "Vết xước 94.8%")
+     * nên lúc đang chạy vẫn hiện kết quả ảo. Để trống số khi chưa có kết quả thật.
+     */
+    const currentRes: InferenceResult = inferenceResult || {
       timestamp: new Date().toLocaleTimeString(),
-      status: mode === 'COUNTING' ? 'COUNT' : 'NG',
+      status: mode === 'COUNTING' ? 'COUNT' : 'OK',
       mode: mode,
-      totalObjects: mode === 'COUNTING' ? 25 : 2,
-      countsByClass: {
-        screw: 12,
-        washer: 8,
-        wood_screw: 5
-      },
-      defectType: 'Vết xước (Scratch) - 94.8%',
-      confidence: 94.8
+      totalObjects: 0,
+      countsByClass: {},
+      confidence: 0
     };
+
+    /*
+     * 20092026 - KIET - Lấy số liệu thật từ metrics backend trả về thay vì hardcode.
+     * ok = tổng object - số object NG.
+     */
+    const isProcessing = isRunning && !inferenceResult;
+    const totalChecked = currentRes.metrics?.total_objects ?? currentRes.totalObjects ?? 0;
+    const ngCount = currentRes.metrics?.ng_count ?? (currentRes.status === 'NG' ? 1 : 0);
+    const okCount = Math.max(0, totalChecked - ngCount);
+    const latencyMs = currentRes.metrics?.latency_ms;
+    const maxScore = currentRes.metrics?.max_score ?? currentRes.confidence;
 
     return (
       <div className="panel-container panel-details">
@@ -144,8 +154,17 @@ export const PanelDetails: React.FC<PanelDetailsProps> = ({
             {/* INSPECTION MODE DETAILS */}
             {mode === 'INSPECTION' && (
               <div className="inspection-result-group">
-                <div className={`qc-status-banner ${currentRes.status.toLowerCase()}`}>
-                  {currentRes.status === 'OK' ? (
+                {/* 20092026 - KIET - Đang chạy thì báo "đang xử lý", không kết luận OK/NG vội */}
+                <div className={`qc-status-banner ${isProcessing ? 'processing' : currentRes.status.toLowerCase()}`}>
+                  {isProcessing ? (
+                    <>
+                      <Activity size={22} />
+                      <div>
+                        <strong>ĐANG XỬ LÝ...</strong>
+                        <span>Đang phân tích ảnh, vui lòng đợi.</span>
+                      </div>
+                    </>
+                  ) : currentRes.status === 'OK' ? (
                     <>
                       <CheckCircle size={22} />
                       <div>
@@ -164,39 +183,43 @@ export const PanelDetails: React.FC<PanelDetailsProps> = ({
                   )}
                 </div>
 
+                {/* 20092026 - KIET - Hiện số thật từ backend, không còn hardcode 2/1/1 */}
                 <div className="inspection-metrics-row">
                   <div className="insp-metric-card">
                     <span className="insp-label">Tổng kiểm tra</span>
-                    <span className="insp-val font-mono">2 SP</span>
+                    <span className="insp-val font-mono">{totalChecked} SP</span>
                   </div>
                   <div className="insp-metric-card ok">
                     <span className="insp-label">Đạt (OK)</span>
-                    <span className="insp-val font-mono">1 SP</span>
+                    <span className="insp-val font-mono">{okCount} SP</span>
                   </div>
                   <div className="insp-metric-card ng">
                     <span className="insp-label">Lỗi (NG)</span>
-                    <span className="insp-val font-mono">1 SP</span>
+                    <span className="insp-val font-mono">{ngCount} SP</span>
                   </div>
                 </div>
 
-                <div className="defect-detail-box">
-                  <span className="defect-detail-label">Chi tiết lỗi chính:</span>
-                  <span className="defect-detail-val text-red">
-                    <AlertTriangle size={13} /> {currentRes.defectType || 'Vết xước (Scratch) - 94.8%'}
-                  </span>
-                </div>
+                {/* 20092026 - KIET - Chỉ hiện dòng lỗi đỏ khi thật sự có NG */}
+                {ngCount > 0 && (
+                  <div className="defect-detail-box">
+                    <span className="defect-detail-label">Chi tiết lỗi chính:</span>
+                    <span className="defect-detail-val text-red">
+                      <AlertTriangle size={13} /> {currentRes.defectType || 'Defect Detected'}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
-            {/* Common Latency Metrics */}
+            {/* 20092026 - KIET - Lấy độ trễ và score thật từ metrics, bỏ số cứng 6.4ms/99.2% */}
             <div className="metrics-footer-row">
               <div className="metric-chip">
                 <span>Độ trễ Processing:</span>
-                <strong className="font-mono">6.4 ms</strong>
+                <strong className="font-mono">{latencyMs != null ? `${latencyMs} ms` : '--'}</strong>
               </div>
               <div className="metric-chip">
                 <span>Độ chính xác (Score):</span>
-                <strong className="font-mono">99.2%</strong>
+                <strong className="font-mono">{maxScore ? `${(maxScore * 100).toFixed(1)}%` : '--'}</strong>
               </div>
             </div>
           </div>

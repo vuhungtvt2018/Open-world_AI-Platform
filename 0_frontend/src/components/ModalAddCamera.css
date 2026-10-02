@@ -70,12 +70,20 @@
 
 .form-row.three-col {
   grid-template-columns: 1fr 1fr 1fr;
+  /* 19092026 - KIET - Nhãn FPS dài hơn nên có thể xuống 2 dòng, canh đáy cho 3 ô thẳng hàng */
+  align-items: end;
 }
 
+/*
+ * 19092026 - KIET - Ô trong grid mặc định là min-width:auto nên không co nhỏ hơn
+ * bề rộng gốc của thẻ input (~20 ký tự). 3 cột Width/Height/FPS cộng lại rộng hơn
+ * modal làm ô FPS tràn ra ngoài và bị cắt. Cho phép co lại bằng min-width:0.
+ */
 .form-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .form-group label {
@@ -92,6 +100,9 @@
   color: var(--text);
   font-size: 0.85rem;
   outline: none;
+  /* 19092026 - KIET - Ép input vừa đúng bề rộng cột, không dùng bề rộng mặc định */
+  width: 100%;
+  min-width: 0;
 }
 
 .modal-input:focus, .modal-select:focus {

@@ -480,24 +480,37 @@ export default function DatasetManagement() {
                 </div>
               </div>
 
-              {previewImage.task_type === 'detection' && (
-                <div className="dataset-modal-panel">
-                  <span className="dataset-modal-label">Result (Counting)</span>
+              {/*
+                20092026 - KIET - Trước đây chỉ hiện panel Result cho Counting nên
+                ảnh Inspection phóng to bị mất bbox. Hiện cho cả hai chế độ, dùng
+                đúng nguồn ảnh như thẻ ngoài danh sách.
+              */}
+              <div className="dataset-modal-panel">
+                <span className="dataset-modal-label">
+                  {previewImage.task_type === 'detection' ? 'Result (Counting)' : 'Result (Inspection)'}
+                </span>
+                <div
+                  className={`dataset-modal-figure ${previewZoom > 1 ? (isDraggingPreview ? 'dragging' : 'draggable') : ''}`}
+                  title={previewZoom > 1 ? 'Kéo chuột để di chuyển • Nhấp đúp để reset' : undefined}
+                  onMouseDown={startPreviewDrag}
+                  onDoubleClick={() => (previewZoom > 1 ? resetPreviewView() : setPreviewZoom(2))}
+                >
                   <div
-                    className={`dataset-modal-figure ${previewZoom > 1 ? (isDraggingPreview ? 'dragging' : 'draggable') : ''}`}
-                    title={previewZoom > 1 ? 'Kéo chuột để di chuyển • Nhấp đúp để reset' : undefined}
-                    onMouseDown={startPreviewDrag}
-                    onDoubleClick={() => (previewZoom > 1 ? resetPreviewView() : setPreviewZoom(2))}
+                    className="dataset-modal-viewport"
+                    style={{ transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewZoom})` }}
                   >
-                    <div
-                      className="dataset-modal-viewport"
-                      style={{ transform: `translate(${previewOffset.x}px, ${previewOffset.y}px) scale(${previewZoom})` }}
-                    >
+                    {previewImage.task_type === 'detection' ? (
                       <DatasetDetectionResult recordId={previewImage.id} />
-                    </div>
+                    ) : (
+                      <img
+                        src={`${API_BASE_URL}/api/result_image/${previewImage.name}`}
+                        alt={`Result ${previewImage.name}`}
+                        draggable={false}
+                      />
+                    )}
                   </div>
                 </div>
-              )}
+              </div>
             </div>
 
             {Object.keys(previewImage.counts_by_class || {}).length > 0 && (

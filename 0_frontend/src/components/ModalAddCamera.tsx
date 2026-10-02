@@ -187,7 +187,7 @@ export const ModalAddCamera: React.FC<ModalAddCameraProps> = ({
           {/* Row 4: Assigned Task & Location */}
           <div className="form-row">
             <div className="form-group">
-              <label>Nhiệm vụ AI Phân công (Assigned Task):</label>
+              <label>Nhiệm vụ AI Phân công:</label>
               <select
                 value={mode}
                 onChange={(e) => setMode(e.target.value as SystemMode)}

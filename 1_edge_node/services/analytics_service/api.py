@@ -540,6 +540,7 @@ async def get_history():
             23082026 - KHAI - Add task type, camera ID fields and fields for class counting
             """
             results.append({
+                "id": r.id,  # 19092026-KIET-thiếu id khiến frontend không map được record
                 "timestamp": r.timestamp,
                 "image": r.original_image,
                 "ng_detected": r.ng_detected,

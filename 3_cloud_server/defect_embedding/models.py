@@ -1,9 +1,15 @@
 from sqlalchemy import Integer, String, Float, Boolean, Text, DateTime, SmallInteger, func, text as sqltext, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
-from db import Base
+from db import Base, engine
 from config import settings
 from typing import List
+
+# 20092026 - KIET - PostgreSQL dùng kiểu vector của pgvector, SQLite không có kiểu
+# này nên lưu embedding dạng JSON để vẫn chạy được Defect Search.
+EMBEDDING_COLUMN_TYPE = (
+    Vector(settings.EMBEDDING_DIM) if engine.dialect.name == "postgresql" else JSON
+)
 
 class QCProductPhotoLibrary(Base):
     __tablename__ = settings.TABLE_NAME
@@ -14,7 +20,7 @@ class QCProductPhotoLibrary(Base):
     ImageName: Mapped[str | None] = mapped_column(Text)
     ImageType: Mapped[int | None] = mapped_column(SmallInteger)
     ErrorDetail: Mapped[str | None] = mapped_column(Text)
-    embedding: Mapped[list[float] | None] = mapped_column(Vector(settings.EMBEDDING_DIM))
+    embedding: Mapped[list[float] | None] = mapped_column(EMBEDDING_COLUMN_TYPE)
     Insert_PIC: Mapped[str | None] = mapped_column(String(50))
     Insert_Date: Mapped[str | None] = mapped_column(DateTime(timezone=False), server_default=func.now())
     Update_PIC: Mapped[str | None] = mapped_column(String(50))
